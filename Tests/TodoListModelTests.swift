@@ -75,6 +75,24 @@ private enum TodoListModelTests {
         precondition(model.incompleteTasks.contains { $0.id == first.id })
         precondition(model.errorMessage == nil)
 
+        // Rows move between sections after each save. A concurrent refresh must not
+        // leave the moved row pending or make a later completion change get rejected.
+        for completed in [true, false, true, false] {
+            let displayed = model.tasks.first { $0.id == first.id }!
+            let write = Task { await model.setCompleted(displayed, completed: completed) }
+            let refresh = Task { await model.refresh() }
+            let succeeded = await write.value
+            await refresh.value
+            precondition(succeeded, "A row must accept repeated completion and undo operations")
+            precondition(!model.isCompleting(first.id), "A moved row must become interactive after saving")
+            let updated = model.tasks.first { $0.id == first.id }!
+            precondition(updated.isCompleted == completed, "Section placement must match the saved state")
+            precondition(model.completionValue(for: updated) == completed,
+                         "The checkbox must match the row's saved completion styling")
+            let saved = try store.fetchTasks().first { $0.id == first.id }!
+            precondition(saved.isCompleted == completed)
+        }
+
         // Each finished write must remain checked while other rows and refreshes are still in flight.
         let concurrentTasks = try (0..<40).map { try store.addTask(title: "concurrent \($0)") }
         await model.refresh()

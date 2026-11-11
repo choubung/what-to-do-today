@@ -170,46 +170,12 @@ struct TodoListView: View {
         if !tasks.isEmpty {
             Section {
                 ForEach(tasks) { task in
-                    HStack(alignment: .top, spacing: 12) {
-                        Toggle(isOn: Binding(
-                            get: { model.completionValue(for: task) },
-                            set: { value in Task { await model.setCompleted(task, completed: value) } }
-                        )) { Text(task.title) }
-                        .toggleStyle(.checkbox)
-                        .labelsHidden()
-                        .accessibilityLabel(task.title)
-                        .disabled(model.isSaving || model.isCompleting(task.id))
-                        .padding(.top, 2)
-
-                        Text(task.title)
-                            .foregroundStyle(task.isCompleted ? .secondary : .primary)
-                            .strikethrough(task.isCompleted, color: .secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Menu {
-                            stickyActions(for: task)
-                            Button("수정", systemImage: "pencil") { editingTask = task }
-                            Button("삭제", systemImage: "trash", role: .destructive) { deletingTask = task }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .frame(width: 20, height: 20)
-                        }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
-                        .disabled(model.isSaving || model.isCompleting(task.id))
-                        .accessibilityLabel("\(task.title) 옵션")
-                    }
-                    .padding(.vertical, 7)
-                    .contentShape(Rectangle())
-                    .contextMenu {
-                        stickyActions(for: task)
-                        Button("수정", systemImage: "pencil") { editingTask = task }
-                            .disabled(model.isSaving || model.isCompleting(task.id))
-                        Button("삭제", systemImage: "trash", role: .destructive) { deletingTask = task }
-                            .disabled(model.isSaving || model.isCompleting(task.id))
-                    }
+                    TodoTaskRow(
+                        model: model,
+                        taskID: task.id,
+                        edit: { editingTask = $0 },
+                        delete: { deletingTask = $0 }
+                    )
                 }
             } header: {
                 VStack(alignment: .leading, spacing: 8) {
@@ -225,23 +191,6 @@ struct TodoListView: View {
         }
     }
 
-    @ViewBuilder
-    private func stickyActions(for task: TodoItem) -> some View {
-        if !task.isCompleted {
-            Button(model.isStickyVisible(for: task.id) ? "포스트잇 앞으로 가져오기" : "포스트잇 띄우기", systemImage: "note") {
-                Task { _ = await model.showStickyNotes([task.id]) }
-            }
-            .disabled(model.isSaving)
-            if model.isStickyVisible(for: task.id) {
-                Button("포스트잇 숨기기", systemImage: "eye.slash") {
-                    Task { _ = await model.hideStickyNotes([task.id]) }
-                }
-                .disabled(model.isSaving)
-            }
-            Divider()
-        }
-    }
-
     private func addTask() {
         guard !newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let title = newTitle
@@ -253,6 +202,80 @@ struct TodoListView: View {
             }
             isEntryFocused = true
         }
+    }
+}
+
+// Resolve current data by identity so moving between sections cannot retain a stale task.
+// The row also observes pending-save changes when ForEach's task values are unchanged.
+private struct TodoTaskRow: View {
+    @ObservedObject var model: TodoListModel
+    let taskID: UUID
+    let edit: (TodoItem) -> Void
+    let delete: (TodoItem) -> Void
+
+    var body: some View {
+        if let task = model.tasks.first(where: { $0.id == taskID }) {
+            taskContent(task)
+        }
+    }
+
+    private func taskContent(_ task: TodoItem) -> some View {
+        let isCompleted = model.completionValue(for: task)
+        let isBusy = model.isSaving || model.isCompleting(task.id)
+        return HStack(alignment: .top, spacing: 12) {
+            Toggle(isOn: Binding(
+                get: { isCompleted },
+                set: { value in Task { await model.setCompleted(task, completed: value) } }
+            )) { Text(task.title) }
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+            .accessibilityLabel(task.title)
+            .disabled(isBusy)
+            .padding(.top, 2)
+
+            Text(task.title)
+                .foregroundStyle(isCompleted ? .secondary : .primary)
+                .strikethrough(isCompleted, color: .secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Menu {
+                taskActions(task)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 20, height: 20)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(isBusy)
+            .accessibilityLabel("\(task.title) 옵션")
+        }
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+        .contextMenu { taskActions(task) }
+    }
+
+    @ViewBuilder
+    private func taskActions(_ task: TodoItem) -> some View {
+        let isBusy = model.isSaving || model.isCompleting(task.id)
+        if !model.completionValue(for: task) {
+            Button(model.isStickyVisible(for: task.id) ? "포스트잇 앞으로 가져오기" : "포스트잇 띄우기", systemImage: "note") {
+                Task { _ = await model.showStickyNotes([task.id]) }
+            }
+            .disabled(isBusy)
+            if model.isStickyVisible(for: task.id) {
+                Button("포스트잇 숨기기", systemImage: "eye.slash") {
+                    Task { _ = await model.hideStickyNotes([task.id]) }
+                }
+                .disabled(isBusy)
+            }
+            Divider()
+        }
+        Button("수정", systemImage: "pencil") { edit(task) }
+            .disabled(isBusy)
+        Button("삭제", systemImage: "trash", role: .destructive) { delete(task) }
+            .disabled(isBusy)
     }
 }
 
