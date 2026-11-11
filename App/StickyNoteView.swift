@@ -15,6 +15,7 @@ struct StickyNoteView: View {
     let task: TodoItem
     let note: StickyNoteState
     let onHide: () -> Void
+    let onComplete: () -> Void
     @State private var isChangingFontSize = false
 
     private var fontSize: Double { model.effectiveStickyFontSize(for: note) }
@@ -38,7 +39,7 @@ struct StickyNoteView: View {
                     HStack(alignment: .top, spacing: 10) {
                         Toggle("완료", isOn: Binding(
                             get: { model.completionValue(for: task) },
-                            set: { value in Task { await model.setCompleted(task, completed: value) } }
+                            set: { value in if value { onComplete() } }
                         ))
                         .labelsHidden()
                         .toggleStyle(.checkbox)

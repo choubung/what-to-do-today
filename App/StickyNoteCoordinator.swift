@@ -10,6 +10,7 @@ private struct StickyNoteGeometry: Equatable {
 @MainActor
 final class StickyNoteCoordinator: NSObject {
     private let model: TodoListModel
+    private let completionFeedback = CompletionFeedbackController()
     private var windows: [UUID: StickyNoteWindowController] = [:]
     private var snapshotSubscription: AnyCancellable?
     private var pendingGeometry: [UUID: StickyNoteGeometry] = [:]
@@ -91,6 +92,7 @@ final class StickyNoteCoordinator: NSObject {
                 self?.scheduleGeometry(geometry, for: note.id)
             }
             controller.onHide = { [weak self] in self?.hide(note.id) }
+            controller.onComplete = { [weak self] task in self?.complete(task) }
             windows[note.id] = controller
             controller.show()
             let geometry = controller.currentGeometry
@@ -109,6 +111,17 @@ final class StickyNoteCoordinator: NSObject {
             guard let self else { return }
             await flushPositions()
             _ = await model.hideStickyNotes([id])
+        }
+    }
+
+    private func complete(_ task: TodoItem) {
+        // A successful save removes the sticky window during snapshot reconciliation.
+        guard let frame = windows[task.id]?.window?.frame else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            if await model.setCompleted(task, completed: true) {
+                completionFeedback.show(near: frame)
+            }
         }
     }
 
@@ -216,6 +229,7 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
     private var isRegisteredInWindowMenu = false
     var onGeometryChange: ((StickyNoteGeometry) -> Void)?
     var onHide: (() -> Void)?
+    var onComplete: ((TodoItem) -> Void)?
 
     var currentGeometry: StickyNoteGeometry {
         let frame = window?.frame ?? .zero
@@ -283,7 +297,8 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
         guard hostingView == nil || contentChanged else { return }
         let content = StickyNoteView(
             model: model, task: task, note: note,
-            onHide: { [weak self] in self?.onHide?() }
+            onHide: { [weak self] in self?.onHide?() },
+            onComplete: { [weak self] in self?.onComplete?(task) }
         )
         if let hostingView {
             hostingView.rootView = content
@@ -323,6 +338,7 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
     func discard() {
         onGeometryChange = nil
         onHide = nil
+        onComplete = nil
         if let window { NSApp.removeWindowsItem(window) }
         isRegisteredInWindowMenu = false
         window?.delegate = nil

@@ -161,8 +161,9 @@ final class TodoListModel: ObservableObject {
         await save { try await self.repository.update(id: id, title: title) }
     }
 
-    func setCompleted(_ task: TodoItem, completed: Bool) async {
-        guard !isSaving, !isCompleting(task.id) else { return }
+    @discardableResult
+    func setCompleted(_ task: TodoItem, completed: Bool) async -> Bool {
+        guard !isSaving, !isCompleting(task.id) else { return false }
         pendingCompletions[task.id] = completed
         if errorMessage != nil { errorMessage = nil }
         defer {
@@ -172,10 +173,13 @@ final class TodoListModel: ObservableObject {
         do {
             try await repository.setCompleted(id: task.id, completed: completed)
             notifyChange(reloadWidgets: true)
+            await refresh()
+            return true
         } catch {
             present(error)
+            await refresh()
+            return false
         }
-        await refresh()
     }
 
     func delete(_ task: TodoItem) async -> Bool {

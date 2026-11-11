@@ -38,6 +38,8 @@ private enum TodoListModelTests {
         }
         precondition(!model.isSaving, "Completing a row must not disable the whole app")
         precondition(model.completionValue(for: first) && model.completionValue(for: second))
+        let duplicateCompletion = await model.setCompleted(first, completed: true)
+        precondition(!duplicateCompletion, "A duplicate pending completion must not report another success")
         var beganWaiting = false
         var finishedWaiting = false
         let terminationWait = Task {
@@ -48,8 +50,9 @@ private enum TodoListModelTests {
         while !beganWaiting { await Task.yield() }
         precondition(!finishedWaiting, "Quit must wait for pending completion writes")
         precondition(sqlite3_exec(lockConnection, "COMMIT", nil, nil, nil) == SQLITE_OK)
-        await firstWrite.value
-        await secondWrite.value
+        let firstSucceeded = await firstWrite.value
+        let secondSucceeded = await secondWrite.value
+        precondition(firstSucceeded && secondSucceeded, "Only persisted writes can report success")
         await terminationWait.value
         precondition(finishedWaiting && !model.isCompleting(first.id) && !model.isCompleting(second.id))
         precondition(model.completedTasks.count == 2)
@@ -62,11 +65,13 @@ private enum TodoListModelTests {
             BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;
             """, nil, nil, nil) == SQLITE_OK)
         let completedFirst = model.tasks.first { $0.id == first.id }!
-        await model.setCompleted(completedFirst, completed: false)
+        let failedUndo = await model.setCompleted(completedFirst, completed: false)
+        precondition(!failedUndo, "Failed writes must not trigger success feedback")
         precondition(model.completionValue(for: completedFirst))
         precondition(!model.isCompleting(first.id) && model.errorMessage != nil)
         precondition(sqlite3_exec(lockConnection, "DROP TRIGGER fail_completion", nil, nil, nil) == SQLITE_OK)
-        await model.setCompleted(completedFirst, completed: false)
+        let successfulUndo = await model.setCompleted(completedFirst, completed: false)
+        precondition(successfulUndo)
         precondition(model.incompleteTasks.contains { $0.id == first.id })
         precondition(model.errorMessage == nil)
 
