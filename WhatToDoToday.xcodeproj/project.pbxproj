@@ -5,6 +5,16 @@
 	};
 	"objectVersion" = 56;
 	"objects" = {
+		"CBDF94E9B23E44938BE6C130" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "App/CompletionFeedbackController.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"0F3C25E273934A7480F5BACE" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "CBDF94E9B23E44938BE6C130";
+		};
 		"44D14998D1DA7D5C61F83C53" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -94,6 +104,7 @@
 		"1C48CE29E4E135EE62951B22" = {
 			"isa" = "PBXGroup";
 			"children" = (
+				"CBDF94E9B23E44938BE6C130",
 				"C9B33A00AD0ABC7DA5D92E59",
 				"89FBB49C269DD96D95C7BE81",
 				"B49A1F7F23162CC4CD1C1022",
@@ -454,6 +465,7 @@
 			"isa" = "PBXSourcesBuildPhase";
 			"buildActionMask" = 2147483647;
 			"files" = (
+				"0F3C25E273934A7480F5BACE",
 				"43764C136629B89347814C0E",
 				"6B4B9F500B2FB874F8B4B7CB",
 				"C910615F03456BD66E41F759",
