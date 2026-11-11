@@ -19,9 +19,12 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     private var mainWindow: NSWindow?
     private var quickAddWindow: NSPanel?
     private var openedFromURL = false
+    private lazy var stickyNotes = StickyNoteCoordinator(model: model)
+    private var isPreparingToTerminate = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenu()
+        _ = stickyNotes
         // URL launch events arrive during startup. Defer the default window until they are handled.
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.openedFromURL else { return }
@@ -49,11 +52,26 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { showMainWindow() }
+        if mainWindow?.isVisible != true || mainWindow?.isMiniaturized == true { showMainWindow() }
         return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !isPreparingToTerminate else { return .terminateLater }
+        isPreparingToTerminate = true
+        Task {
+            await model.waitForPendingSave()
+            await stickyNotes.flushPositions()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    @objc private func hideAllStickyNotes() {
+        Task { _ = await model.hideAllStickyNotes() }
+    }
 
     @objc private func showMainWindow() {
         if mainWindow == nil {
@@ -71,6 +89,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
             window.center()
             mainWindow = window
         }
+        if mainWindow?.isMiniaturized == true { mainWindow?.deminiaturize(nil) }
         mainWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -117,6 +136,10 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         listItem.target = self
         fileMenu.addItem(listItem)
         fileMenu.addItem(.separator())
+        let hideNotesItem = NSMenuItem(title: "포스트잇 모두 숨기기", action: #selector(hideAllStickyNotes), keyEquivalent: "")
+        hideNotesItem.target = self
+        fileMenu.addItem(hideNotesItem)
+        fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "창 닫기", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         fileItem.submenu = fileMenu
         menu.addItem(fileItem)
@@ -133,6 +156,16 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "전체 선택", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu
         menu.addItem(editItem)
+
+        let windowItem = NSMenuItem(title: "윈도우", action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu(title: "윈도우")
+        windowMenu.addItem(withTitle: "최소화", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "확대/축소", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "모두 앞으로 가져오기", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowItem.submenu = windowMenu
+        menu.addItem(windowItem)
         NSApp.mainMenu = menu
+        NSApp.windowsMenu = windowMenu
     }
 }

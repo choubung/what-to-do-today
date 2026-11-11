@@ -5,6 +5,7 @@ struct TodoListView: View {
     @State private var newTitle = ""
     @State private var editingTask: TodoItem?
     @State private var deletingTask: TodoItem?
+    @State private var showingStickyPicker = false
     @FocusState private var isEntryFocused: Bool
     @Environment(\.controlActiveState) private var controlActiveState
 
@@ -29,6 +30,22 @@ struct TodoListView: View {
             }
             .padding(16)
 
+            HStack {
+                Button("포스트잇 띄우기", systemImage: "note") {
+                    showingStickyPicker = true
+                }
+                .disabled(model.incompleteTasks.isEmpty || model.isSaving)
+                Spacer()
+                Button("모두 숨기기", systemImage: "eye.slash") {
+                    Task { _ = await model.hideAllStickyNotes() }
+                }
+                .disabled(model.visibleStickyCount == 0 || model.isSaving)
+                .help("할 일의 완료 상태를 바꾸지 않고 모든 포스트잇을 숨깁니다.")
+            }
+            .controlSize(.small)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+
             Divider()
 
             if model.isLoading {
@@ -52,6 +69,9 @@ struct TodoListView: View {
         .sheet(item: $editingTask) { task in
             EditTaskView(model: model, task: task)
         }
+        .sheet(isPresented: $showingStickyPicker) {
+            StickyNotePickerView(model: model)
+        }
         .confirmationDialog("할 일을 삭제할까요?", isPresented: Binding(
             get: { deletingTask != nil },
             set: { if !$0 { deletingTask = nil } }
@@ -65,7 +85,7 @@ struct TodoListView: View {
             Text(task.title)
         }
         .alert("처리하지 못했어요", isPresented: Binding(
-            get: { model.errorMessage != nil && editingTask == nil && controlActiveState == .key },
+            get: { model.errorMessage != nil && editingTask == nil && !showingStickyPicker && controlActiveState == .key },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
             Button("다시 불러오기") {
@@ -102,6 +122,7 @@ struct TodoListView: View {
                             .fixedSize(horizontal: false, vertical: true)
 
                         Menu {
+                            stickyActions(for: task)
                             Button("수정", systemImage: "pencil") { editingTask = task }
                             Button("삭제", systemImage: "trash", role: .destructive) { deletingTask = task }
                         } label: {
@@ -116,6 +137,7 @@ struct TodoListView: View {
                     }
                     .padding(.vertical, 7)
                     .contextMenu {
+                        stickyActions(for: task)
                         Button("수정", systemImage: "pencil") { editingTask = task }
                             .disabled(model.isSaving)
                         Button("삭제", systemImage: "trash", role: .destructive) { deletingTask = task }
@@ -131,12 +153,118 @@ struct TodoListView: View {
         }
     }
 
+    @ViewBuilder
+    private func stickyActions(for task: TodoItem) -> some View {
+        if !task.isCompleted {
+            Button(model.isStickyVisible(for: task.id) ? "포스트잇 앞으로 가져오기" : "포스트잇 띄우기", systemImage: "note") {
+                Task { _ = await model.showStickyNotes([task.id]) }
+            }
+            .disabled(model.isSaving)
+            if model.isStickyVisible(for: task.id) {
+                Button("포스트잇 숨기기", systemImage: "eye.slash") {
+                    Task { _ = await model.hideStickyNotes([task.id]) }
+                }
+                .disabled(model.isSaving)
+            }
+            Divider()
+        }
+    }
+
     private func addTask() {
         guard !newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let title = newTitle
         Task {
             if await model.add(title: title) { newTitle = "" }
             isEntryFocused = true
+        }
+    }
+}
+
+private struct StickyNotePickerView: View {
+    @ObservedObject var model: TodoListModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedIDs: Set<UUID> = []
+
+    private var availableIDs: [UUID] { model.incompleteTasks.map(\.id) }
+    private var selectedCount: Int { selectedIDs.intersection(availableIDs).count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("포스트잇 띄우기").font(.headline)
+            Text("바탕화면에 띄울 할 일을 선택하세요.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("전체 선택") { selectedIDs = Set(availableIDs) }
+                    .disabled(availableIDs.isEmpty || selectedCount == availableIDs.count || model.isSaving)
+                Button("선택 해제") { selectedIDs.removeAll() }
+                    .disabled(selectedCount == 0 || model.isSaving)
+                Spacer()
+                Text("\(selectedCount)개 선택")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .controlSize(.small)
+
+            if model.incompleteTasks.isEmpty {
+                Text("띄울 수 있는 미완료 할 일이 없어요.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 100)
+            } else {
+                List(model.incompleteTasks) { task in
+                    Toggle(isOn: Binding(
+                        get: { selectedIDs.contains(task.id) },
+                        set: { isSelected in
+                            if isSelected { selectedIDs.insert(task.id) }
+                            else { selectedIDs.remove(task.id) }
+                        }
+                    )) {
+                        HStack {
+                            Text(task.title)
+                                .lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            if model.isStickyVisible(for: task.id) {
+                                Text("표시 중")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    .disabled(model.isSaving)
+                    .padding(.vertical, 4)
+                }
+                .listStyle(.inset)
+                .frame(minHeight: 140, idealHeight: 240, maxHeight: 320)
+            }
+
+            if let error = model.errorMessage {
+                Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+            }
+            HStack {
+                Spacer()
+                Button("취소") {
+                    model.errorMessage = nil
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                .disabled(model.isSaving)
+                Button("띄우기") {
+                    let ids = availableIDs.filter { selectedIDs.contains($0) }
+                    Task {
+                        if await model.showStickyNotes(ids) { dismiss() }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(selectedCount == 0 || model.isSaving)
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
+        .interactiveDismissDisabled(model.isSaving)
+        .onAppear { model.errorMessage = nil }
+        .onChange(of: availableIDs) { _, ids in
+            selectedIDs.formIntersection(ids)
         }
     }
 }
