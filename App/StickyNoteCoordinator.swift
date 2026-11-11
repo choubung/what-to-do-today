@@ -198,13 +198,21 @@ private final class StickyNotePanel: NSPanel {
 }
 
 @MainActor
+private final class StickyNoteHostingView: NSHostingView<StickyNoteView> {
+    // A nonactivating panel must opt in to both the first click and key focus.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var needsPanelToBecomeKey: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+}
+
+@MainActor
 private final class StickyNoteWindowController: NSWindowController, NSWindowDelegate {
     private let model: TodoListModel
     private var task: TodoItem
     private var note: StickyNoteState
     private var suppressGeometryChanges = false
     private var placementDisplayID: String?
-    private var hostingView: NSHostingView<StickyNoteView>?
+    private var hostingView: StickyNoteHostingView?
     private var isRegisteredInWindowMenu = false
     var onGeometryChange: ((StickyNoteGeometry) -> Void)?
     var onHide: (() -> Void)?
@@ -280,7 +288,7 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
         if let hostingView {
             hostingView.rootView = content
         } else {
-            let hostingView = NSHostingView(rootView: content)
+            let hostingView = StickyNoteHostingView(rootView: content)
             // Keep the custom drag strip in the transparent titlebar and let native
             // edge resizing determine the frame instead of the text's ideal size.
             hostingView.safeAreaRegions = []
