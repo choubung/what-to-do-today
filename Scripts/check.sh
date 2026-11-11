@@ -11,7 +11,7 @@ xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
 "$build_dir/store-tests"
 
 xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
-  Shared/TodoItem.swift Shared/StickyNoteState.swift \
+  Shared/TodoItem.swift Shared/StickyNoteState.swift Shared/TodoReminder.swift \
   App/StickyNoteLayout.swift Tests/StickyNoteLayoutTests.swift \
   -o "$build_dir/layout-tests"
 "$build_dir/layout-tests"
@@ -20,6 +20,11 @@ xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
   Shared/*.swift App/TodoListModel.swift Tests/TodoListModelTests.swift \
   -o "$build_dir/model-tests"
 "$build_dir/model-tests"
+
+xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
+  Shared/TodoReminder.swift Tests/ReminderPolicyTests.swift \
+  -o "$build_dir/reminder-tests"
+"$build_dir/reminder-tests"
 
 xcrun swiftc -typecheck -swift-version 6 \
   -target "$(uname -m)-apple-macos27.0.1" \

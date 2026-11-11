@@ -125,6 +125,42 @@ private enum TodoListModelTests {
         let staleAssignment = await model.setCategory(id: first.id, categoryID: category.id)
         precondition(!staleAssignment && model.errorMessage == TodoStoreError.missingCategory.localizedDescription)
 
+        let reminderTime = ReminderLocalTime(year: 2030, month: 5, day: 12, hour: 9, minute: 30)!
+        let scheduled = await model.setReminder(id: first.id, localTime: reminderTime)
+        precondition(scheduled && model.reminder(for: first.id)?.schedule == reminderTime)
+        let reminder = model.reminder(for: first.id)!
+        let candidates = try await model.loadPendingReminders()
+        precondition(candidates.contains { $0.taskID == first.id && $0.reminder == reminder })
+        precondition(sqlite3_exec(lockConnection, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK)
+        var markerStarted = false
+        let deliveryMarker = Task {
+            markerStarted = true
+            try await model.markRemindersDelivered(generations: [reminder.generationID], at: Date(timeIntervalSince1970: 456))
+        }
+        while !markerStarted { await Task.yield() }
+        beganWaiting = false
+        finishedWaiting = false
+        let markerWait = Task {
+            beganWaiting = true
+            await model.waitForPendingSave()
+            finishedWaiting = true
+        }
+        while !beganWaiting { await Task.yield() }
+        precondition(!finishedWaiting, "Quit must wait for an in-flight reminder delivery acknowledgement")
+        precondition(sqlite3_exec(lockConnection, "COMMIT", nil, nil, nil) == SQLITE_OK)
+        try await deliveryMarker.value
+        await markerWait.value
+        precondition(finishedWaiting)
+        precondition(model.reminder(for: first.id)?.deliveredAt == Date(timeIntervalSince1970: 456))
+        let rescheduled = await model.setReminder(id: first.id, localTime: reminderTime)
+        precondition(rescheduled && model.reminder(for: first.id)?.deliveredAt == nil)
+        let cancelled = await model.removeReminder(id: first.id)
+        precondition(cancelled && model.reminder(for: first.id) == nil)
+        let completedTask = model.tasks.first { $0.id == second.id }!
+        precondition(completedTask.isCompleted)
+        let rejectedReminder = await model.setReminder(id: second.id, localTime: reminderTime)
+        precondition(!rejectedReminder && model.errorMessage == TodoStoreError.completedTaskReminder.localizedDescription)
+
         try store.showStickyNotes(ids: [first.id])
         await model.refresh()
         await model.setStickyFontSize(id: first.id, fontSize: 24)

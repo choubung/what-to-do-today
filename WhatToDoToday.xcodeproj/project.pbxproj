@@ -5,6 +5,50 @@
 	};
 	"objectVersion" = 56;
 	"objects" = {
+		"79898B7E1EF29C692E8FD6FE" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "App/ReminderSettingsView.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"C4EED4F21257F245EFC18B51" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "79898B7E1EF29C692E8FD6FE";
+		};
+		"EDCE8D5DC9DCA52C3F33E45A" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "App/ReminderLaunchPolicy.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"2150175E2CBC0F8A31840A56" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "EDCE8D5DC9DCA52C3F33E45A";
+		};
+		"B21CFB2BD917AD1463D3DF05" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "App/ReminderCoordinator.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"6C90732577690474B503F45C" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "B21CFB2BD917AD1463D3DF05";
+		};
+		"BBCC9733DD239910EC3A7A9A" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Shared/TodoReminder.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"170469E969316ADFE0972F12" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "BBCC9733DD239910EC3A7A9A";
+		};
+		"2854F2FD5362BEBF79BE8A68" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "BBCC9733DD239910EC3A7A9A";
+		};
 		"12558FB3E82CB58263FE877F" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -128,6 +172,9 @@
 		"1C48CE29E4E135EE62951B22" = {
 			"isa" = "PBXGroup";
 			"children" = (
+				"79898B7E1EF29C692E8FD6FE",
+				"EDCE8D5DC9DCA52C3F33E45A",
+				"B21CFB2BD917AD1463D3DF05",
 				"CBDF94E9B23E44938BE6C130",
 				"C9B33A00AD0ABC7DA5D92E59",
 				"89FBB49C269DD96D95C7BE81",
@@ -157,6 +204,7 @@
 		"44C7E229889FE9D1BB841A79" = {
 			"isa" = "PBXGroup";
 			"children" = (
+				"BBCC9733DD239910EC3A7A9A",
 				"12558FB3E82CB58263FE877F",
 				"44D14998D1DA7D5C61F83C53",
 				"32245F28D0E9559254A6C642",
@@ -323,6 +371,7 @@
 			"isa" = "PBXSourcesBuildPhase";
 			"buildActionMask" = 2147483647;
 			"files" = (
+				"2854F2FD5362BEBF79BE8A68",
 				"B642A4ED636631F946BEE89F",
 				"12D2F58D898400D5866B8C60",
 				"DC3DED4AB201E36616F724E5",
@@ -358,8 +407,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.0";
-				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "1.1";
+				"CURRENT_PROJECT_VERSION" = "2";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "TodoWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
@@ -390,8 +439,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.0";
-				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "1.1";
+				"CURRENT_PROJECT_VERSION" = "2";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "TodoWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
@@ -492,6 +541,10 @@
 			"isa" = "PBXSourcesBuildPhase";
 			"buildActionMask" = 2147483647;
 			"files" = (
+				"C4EED4F21257F245EFC18B51",
+				"2150175E2CBC0F8A31840A56",
+				"6C90732577690474B503F45C",
+				"170469E969316ADFE0972F12",
 				"D6915AEE62FCE98D5E9F5C26",
 				"0F3C25E273934A7480F5BACE",
 				"43764C136629B89347814C0E",
@@ -532,8 +585,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.0";
-				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "1.1";
+				"CURRENT_PROJECT_VERSION" = "2";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "What to Do Today";
 				"PRODUCT_MODULE_NAME" = "WhatToDoToday";
@@ -562,8 +615,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.0";
-				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "1.1";
+				"CURRENT_PROJECT_VERSION" = "2";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "What to Do Today";
 				"PRODUCT_MODULE_NAME" = "WhatToDoToday";

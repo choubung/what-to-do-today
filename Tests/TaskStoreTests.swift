@@ -130,6 +130,7 @@ private enum TaskStoreTests {
         try testStickyFontPersistence(in: directory)
         try testStickyColorPersistence(in: directory)
         try testCategories(in: directory)
+        try testReminders(in: directory)
         print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, concurrency, and sticky-note migration/state tests.")
     }
 
@@ -192,6 +193,84 @@ private enum TaskStoreTests {
         try store.saveStickyColor(id: id, colorHex: "#ABCDEF")
         try expect(try reopened.fetchSnapshot().stickyNotes.isEmpty,
                    "A delayed color save must not recreate a deleted note")
+    }
+
+    private static func testReminders(in directory: URL) throws {
+        let url = directory.appendingPathComponent("legacy-p2-reminders.sqlite")
+        let oldTaskID = UUID()
+        try executeLegacySQL("""
+            CREATE TABLE todos (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL,
+                created_at REAL NOT NULL, completed_at REAL
+            );
+            INSERT INTO todos VALUES ('\(oldTaskID.uuidString)', '예전 미완료', 100, NULL);
+            """, at: url)
+        let store = try TodoStore(databaseURL: url)
+        let secondConnection = try TodoStore(databaseURL: url)
+        try expect(try store.fetchSnapshot().reminders.isEmpty, "Migration must not invent reminders")
+        let original = try store.fetchTasks()
+        let pastTime = ReminderLocalTime(year: 2000, month: 1, day: 2, hour: 9, minute: 15)!
+        let futureTime = ReminderLocalTime(year: 2030, month: 12, day: 31, hour: 23, minute: 59)!
+        let past = try store.setReminder(id: oldTaskID, localTime: pastTime)
+        let otherTask = try store.addTask(title: "다음 알림", showAsStickyNote: true)
+        let future = try store.setReminder(id: otherTask.id, localTime: futureTime)
+        let pending = try secondConnection.fetchPendingReminders()
+        try expect(pending.map(\.reminder) == [past, future], "Pending reads must include both overdue and future reminders across connections")
+        try expect(pending.allSatisfy { !$0.isCompleted && $0.reminder.deliveredAt == nil }, "Pending candidates must describe incomplete undelivered tasks")
+        try expect(try store.fetchTasks().first { $0.id == oldTaskID } == original.first, "Reminder creation must not change original task metadata")
+        try store.updateTask(id: oldTaskID, title: "알림 제목 수정")
+        try expect(try secondConnection.fetchPendingReminders().first?.title == "알림 제목 수정", "Reminder delivery must use the latest task title")
+
+        let firstDeliveredAt = Date(timeIntervalSince1970: 12345)
+        try secondConnection.markRemindersDelivered(generations: [past.generationID, past.generationID, UUID()], at: firstDeliveredAt)
+        try store.markRemindersDelivered(generations: [past.generationID], at: firstDeliveredAt.addingTimeInterval(60))
+        let deliveredSnapshot = try store.fetchSnapshot()
+        try expect(deliveredSnapshot.reminders.first { $0.id == oldTaskID }?.deliveredAt == firstDeliveredAt, "Repeated acknowledgements must preserve the first delivery timestamp")
+        try expect(try store.fetchPendingReminders().map(\.reminder) == [future], "Delivered reminders must not be sent again")
+        try expect(try TodoStore(databaseURL: url).fetchSnapshot() == deliveredSnapshot, "Reminder components and delivery records must survive reopening")
+
+        let replacement = try store.setReminder(id: oldTaskID, localTime: futureTime)
+        try expect(replacement.generationID != past.generationID && replacement.deliveredAt == nil, "Rescheduling must start a new undelivered generation")
+        try secondConnection.markRemindersDelivered(generations: [past.generationID], at: Date())
+        try expect(try store.fetchSnapshot().reminders.first { $0.id == oldTaskID } == replacement, "A late acknowledgement must never consume a newly scheduled reminder")
+        let beforeInvalid = try store.fetchSnapshot()
+        let invalidTime = try JSONDecoder().decode(ReminderLocalTime.self, from: Data("{\"year\":2027,\"month\":2,\"day\":30,\"hour\":12,\"minute\":0}".utf8))
+        do {
+            try store.setReminder(id: oldTaskID, localTime: invalidTime)
+            throw TestFailure(description: "Invalid reminder components were accepted")
+        } catch TodoStoreError.invalidReminder {}
+        do {
+            try store.markRemindersDelivered(generations: [replacement.generationID], at: Date(timeIntervalSince1970: .infinity))
+            throw TestFailure(description: "Invalid delivery timestamp was accepted")
+        } catch TodoStoreError.invalidReminder {}
+        try expect(try store.fetchSnapshot() == beforeInvalid, "Invalid reminder edits must leave all prior records unchanged")
+
+        try secondConnection.setCompleted(id: otherTask.id, completed: true)
+        try expect(try store.fetchSnapshot().reminders.allSatisfy { $0.id != otherTask.id }, "Completion from another process must remove its reminder")
+        do {
+            try store.setReminder(id: otherTask.id, localTime: futureTime)
+            throw TestFailure(description: "Completed task accepted a new reminder")
+        } catch TodoStoreError.completedTaskReminder {}
+        try secondConnection.setCompleted(id: otherTask.id, completed: false)
+        try expect(try store.fetchSnapshot().reminders.allSatisfy { $0.id != otherTask.id }, "Undo completion must not re-arm a reminder")
+
+        try store.setReminder(id: otherTask.id, localTime: futureTime)
+        try executeLegacySQL("UPDATE todos SET completed_at = 1000 WHERE id = '\(otherTask.id.uuidString)'", at: url)
+        try expect(try store.fetchSnapshot().reminders.allSatisfy { $0.id != otherTask.id }, "An old client with foreign keys disabled must still cancel completed reminders")
+        try executeLegacySQL("DELETE FROM todos WHERE id = '\(oldTaskID.uuidString)'", at: url)
+        try expect(try store.fetchSnapshot().reminders.isEmpty, "An old client deleting a task must remove its reminder")
+        do {
+            try store.setReminder(id: oldTaskID, localTime: futureTime)
+            throw TestFailure(description: "A deleted task accepted a reminder")
+        } catch TodoStoreError.missingTask {}
+        try store.removeReminder(id: oldTaskID)
+        try store.removeReminder(id: oldTaskID)
+
+        try store.setCompleted(id: otherTask.id, completed: false)
+        let last = try store.setReminder(id: otherTask.id, localTime: pastTime)
+        try store.removeReminder(id: otherTask.id)
+        try store.markRemindersDelivered(generations: [last.generationID], at: Date())
+        try expect(try store.fetchPendingReminders().isEmpty && store.fetchSnapshot().reminders.isEmpty, "Removal and stale delivery acknowledgement must be retry-safe")
     }
 
     private static func testCategories(in directory: URL) throws {
