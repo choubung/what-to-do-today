@@ -88,6 +88,48 @@
 			"name" = "Tests";
 			"sourceTree" = "<group>";
 		};
+		"40D430E4460360EC696FF63F" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Widget/TodoWidget.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"4FAFF51CE66749F29B4D6129" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Widget/TodoWidgetState.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"052B110F107D13E8C56536A3" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Widget/TodoWidgetIntents.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"B861BC2F2696217D6987ED25" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.plist.xml";
+			"path" = "Widget/Info.plist";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"C81834B933CCD68171DA3297" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.plist.entitlements";
+			"path" = "Widget/Widget.entitlements";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"DDF05173B376DE398B5EAD82" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"40D430E4460360EC696FF63F",
+				"4FAFF51CE66749F29B4D6129",
+				"052B110F107D13E8C56536A3",
+				"B861BC2F2696217D6987ED25",
+				"C81834B933CCD68171DA3297",
+			);
+			"name" = "Widget";
+			"sourceTree" = "<group>";
+		};
 		"B6CDB6E5D160E013280D3C68" = {
 			"isa" = "PBXFileReference";
 			"explicitFileType" = "wrapper.application";
@@ -95,10 +137,18 @@
 			"path" = "What to Do Today.app";
 			"sourceTree" = "BUILT_PRODUCTS_DIR";
 		};
+		"4C47665D1BA4105DF9684DC4" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.app-extension";
+			"includeInIndex" = 0;
+			"path" = "TodoWidget.appex";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
 		"FBDC4F23F93125BBEEAE800C" = {
 			"isa" = "PBXGroup";
 			"children" = (
 				"B6CDB6E5D160E013280D3C68",
+				"4C47665D1BA4105DF9684DC4",
 			);
 			"name" = "Products";
 			"sourceTree" = "<group>";
@@ -110,6 +160,7 @@
 				"1C48CE29E4E135EE62951B22",
 				"44C7E229889FE9D1BB841A79",
 				"156052F04525D0F710673CF0",
+				"DDF05173B376DE398B5EAD82",
 				"FBDC4F23F93125BBEEAE800C",
 			);
 			"sourceTree" = "<group>";
@@ -155,6 +206,173 @@
 			);
 			"defaultConfigurationIsVisible" = 0;
 			"defaultConfigurationName" = "Release";
+		};
+		"DC3DED4AB201E36616F724E5" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "32245F28D0E9559254A6C642";
+		};
+		"785A4355570D55AEA38BF9E7" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "5CFC394B37130138D6B50CFD";
+		};
+		"EF98AC9AD6BFCF4EAD9112A5" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "40D430E4460360EC696FF63F";
+		};
+		"73A8D84FAAB56A7ACA0FB2A5" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "4FAFF51CE66749F29B4D6129";
+		};
+		"805C664DD0AE9054DB5AA366" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "052B110F107D13E8C56536A3";
+		};
+		"6EC00BCFA49935AC08DFABEC" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"DC3DED4AB201E36616F724E5",
+				"785A4355570D55AEA38BF9E7",
+				"EF98AC9AD6BFCF4EAD9112A5",
+				"73A8D84FAAB56A7ACA0FB2A5",
+				"805C664DD0AE9054DB5AA366",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"8875856AB8E652D471E3BB3D" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"4E708565546A5731CEDA3B2E" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"2918A47A6702FE2C717015BC" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"REGISTER_APP_GROUPS" = "YES";
+				"COMBINE_HIDPI_IMAGES" = "YES";
+				"ENABLE_HARDENED_RUNTIME" = "YES";
+				"OTHER_LDFLAGS" = (
+					"$(inherited)",
+					"-lsqlite3",
+				);
+				"MARKETING_VERSION" = "1.0";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"SWIFT_EMIT_LOC_STRINGS" = "YES";
+				"PRODUCT_NAME" = "TodoWidget";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
+				"INFOPLIST_FILE" = "Widget/Info.plist";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"CODE_SIGN_ENTITLEMENTS" = "Widget/Widget.entitlements";
+				"APPLICATION_EXTENSION_API_ONLY" = "YES";
+				"SKIP_INSTALL" = "YES";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
+			};
+			"name" = "Debug";
+		};
+		"852CAC662D14C6B37420381B" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"REGISTER_APP_GROUPS" = "YES";
+				"COMBINE_HIDPI_IMAGES" = "YES";
+				"ENABLE_HARDENED_RUNTIME" = "YES";
+				"OTHER_LDFLAGS" = (
+					"$(inherited)",
+					"-lsqlite3",
+				);
+				"MARKETING_VERSION" = "1.0";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"SWIFT_EMIT_LOC_STRINGS" = "YES";
+				"PRODUCT_NAME" = "TodoWidget";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
+				"INFOPLIST_FILE" = "Widget/Info.plist";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"CODE_SIGN_ENTITLEMENTS" = "Widget/Widget.entitlements";
+				"APPLICATION_EXTENSION_API_ONLY" = "YES";
+				"SKIP_INSTALL" = "YES";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
+			};
+			"name" = "Release";
+		};
+		"92ACCB64BC6E880CEE20F6C9" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"2918A47A6702FE2C717015BC",
+				"852CAC662D14C6B37420381B",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"317F51252E85243F14493A81" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "92ACCB64BC6E880CEE20F6C9";
+			"buildPhases" = (
+				"6EC00BCFA49935AC08DFABEC",
+				"8875856AB8E652D471E3BB3D",
+				"4E708565546A5731CEDA3B2E",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+			);
+			"name" = "TodoWidget";
+			"productName" = "TodoWidget";
+			"productReference" = "4C47665D1BA4105DF9684DC4";
+			"productType" = "com.apple.product-type.app-extension";
+		};
+		"5632E9FDC70F2DC0B2D4E983" = {
+			"isa" = "PBXContainerItemProxy";
+			"containerPortal" = "98F54143AB4E86B28C3AFEE0";
+			"proxyType" = 1;
+			"remoteGlobalIDString" = "317F51252E85243F14493A81";
+			"remoteInfo" = "TodoWidget";
+		};
+		"9DBFE575493DA96D4BE417B0" = {
+			"isa" = "PBXTargetDependency";
+			"target" = "317F51252E85243F14493A81";
+			"targetProxy" = "5632E9FDC70F2DC0B2D4E983";
+		};
+		"F9F2B524F961A2AF392D92CB" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "4C47665D1BA4105DF9684DC4";
+			"settings" = {
+				"ATTRIBUTES" = (
+					"RemoveHeadersOnCopy",
+				);
+			};
+		};
+		"FB1EA9F939ACC40B6A74BC43" = {
+			"isa" = "PBXCopyFilesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"dstPath" = "";
+			"dstSubfolderSpec" = 13;
+			"files" = (
+				"F9F2B524F961A2AF392D92CB",
+			);
+			"name" = "Embed App Extensions";
+			"runOnlyForDeploymentPostprocessing" = 0;
 		};
 		"B1E7BA0E1FEFE98C4A365831" = {
 			"isa" = "PBXBuildFile";
@@ -277,10 +495,12 @@
 				"29FF20F24544855C4934FF1A",
 				"31BC37B385D40BD73FDD16C3",
 				"36E3322A6084BAF98F5A7EB0",
+				"FB1EA9F939ACC40B6A74BC43",
 			);
 			"buildRules" = (
 			);
 			"dependencies" = (
+				"9DBFE575493DA96D4BE417B0",
 			);
 			"name" = "WhatToDoToday";
 			"productName" = "WhatToDoToday";
@@ -294,6 +514,17 @@
 				"LastUpgradeCheck" = "2700";
 				"TargetAttributes" = {
 					"2BF284F0A688BA76DD7E29CA" = {
+						"CreatedOnToolsVersion" = "27.0";
+						"SystemCapabilities" = {
+							"com.apple.ApplicationGroups.iOS" = {
+								"enabled" = 1;
+							};
+							"com.apple.Sandbox" = {
+								"enabled" = 1;
+							};
+						};
+					};
+					"317F51252E85243F14493A81" = {
 						"CreatedOnToolsVersion" = "27.0";
 						"SystemCapabilities" = {
 							"com.apple.ApplicationGroups.iOS" = {
@@ -321,6 +552,7 @@
 			"projectRoot" = "";
 			"targets" = (
 				"2BF284F0A688BA76DD7E29CA",
+				"317F51252E85243F14493A81",
 			);
 		};
 	};

@@ -31,6 +31,24 @@ private enum TaskStoreTests {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("what-to-do-today-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
+
+        let startupFailures = ConcurrentFailures()
+        // Opening an existing WAL database misses the initial journal-mode transition race.
+        for attempt in 0..<100 {
+            let coldDatabaseURL = directory.appendingPathComponent("cold-start-\(attempt)/Tasks.sqlite")
+            DispatchQueue.concurrentPerform(iterations: 2) { worker in
+                do {
+                    let store = try TodoStore(databaseURL: coldDatabaseURL)
+                    try store.addTask(title: "최초 실행 \(worker)")
+                } catch {
+                    startupFailures.append(error)
+                }
+            }
+            try startupFailures.check()
+            let savedTasks = try TodoStore(databaseURL: coldDatabaseURL).fetchTasks()
+            try expect(savedTasks.count == 2, "Concurrent first opens must preserve both successful writes")
+        }
+
         let databaseURL = directory.appendingPathComponent("Tasks.sqlite")
         let appStore = try TodoStore(databaseURL: databaseURL)
         let widgetStore = try TodoStore(databaseURL: databaseURL)
@@ -94,6 +112,6 @@ private enum TaskStoreTests {
         try expect(Set(persisted.map(\.id)).count == 161, "Stored task IDs must remain unique")
         let largePage = try appStore.fetchPage(index: 0, pageSize: Int.max)
         try expect(largePage.pageCount == 1 && largePage.tasks.count == 161, "Large page sizes must not overflow")
-        print("Passed local-store CRUD, Unicode, completion retries, sorting, pagination, and concurrent connection tests.")
+        print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, and concurrent connection tests.")
     }
 }

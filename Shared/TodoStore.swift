@@ -55,8 +55,8 @@ final class TodoStore: @unchecked Sendable {
         }
 
         do {
+            try enableWriteAheadLogging()
             sqlite3_busy_timeout(database, 5_000)
-            try execute("PRAGMA journal_mode = WAL")
             try execute("PRAGMA synchronous = FULL")
             try execute("""
                 CREATE TABLE IF NOT EXISTS todos (
@@ -169,6 +169,20 @@ final class TodoStore: @unchecked Sendable {
         try check(sqlite3_bind_double(statement, 2, Date().timeIntervalSince1970))
         try bind(id.uuidString, to: statement, at: 3)
         try finishWrite(statement, requiresExistingTask: true)
+    }
+
+    private func enableWriteAheadLogging() throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
+        while true {
+            let result = sqlite3_exec(database, "PRAGMA journal_mode = WAL", nil, nil, nil)
+            if result == SQLITE_OK { return }
+            // Journal-mode lock upgrades need an explicit retry during concurrent first opens.
+            guard (result == SQLITE_BUSY || result == SQLITE_LOCKED),
+                  ProcessInfo.processInfo.systemUptime < deadline else {
+                throw databaseError()
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
     }
 
     private func validatedTitle(_ title: String) throws -> String {

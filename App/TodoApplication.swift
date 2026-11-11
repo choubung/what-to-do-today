@@ -91,8 +91,8 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         panel.title = "새 할 일"
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
-        panel.contentView = NSHostingView(rootView: QuickAddView(model: model) { [weak self] in
-            self?.quickAddWindow?.close()
+        panel.contentView = NSHostingView(rootView: QuickAddView(model: model) { [weak panel] in
+            panel?.close()
         })
         panel.center()
         quickAddWindow = panel
