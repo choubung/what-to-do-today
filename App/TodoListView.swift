@@ -9,6 +9,7 @@ struct TodoListView: View {
     @State private var deletingTask: TodoItem?
     @State private var showingStickyPicker = false
     @State private var isSavingFontSize = false
+    @State private var collapsedCategories: Set<String> = []
     @State private var addingCategory: TodoCategory?
     @State private var showingCategories = false
     @State private var categoryMoveNotice: TodoCategory?
@@ -78,7 +79,9 @@ struct TodoListView: View {
             EditTaskView(model: model, task: task, didMoveCategory: showCategoryMoveNotice)
         }
         .sheet(item: $addingCategory) { category in
-            CategoryTaskEntry(model: model, categoryID: category.id)
+            CategoryTaskEntry(model: model, categoryID: category.id) {
+                collapsedCategories.remove("pending:\(category.id)")
+            }
         }
         .sheet(isPresented: $showingStickyPicker) {
             StickyNotePickerView(model: model)
@@ -146,11 +149,32 @@ struct TodoListView: View {
     }
 
     private func categorySection(_ category: TodoCategory, tasks: [TodoItem], completed: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let key = "\(completed ? "completed" : "pending"):\(category.id)"
+        let isCollapsed = collapsedCategories.contains(key)
+        return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(category.name).font(.headline)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
+                Button {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                        if isCollapsed { collapsedCategories.remove(key) }
+                        else { collapsedCategories.insert(key) }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                            .frame(width: 16, height: 24)
+                        Text(category.name).font(.headline)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if isCollapsed {
+                            Text("\(tasks.count)").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(completed ? "한 일" : "할 일") · \(category.name) \(isCollapsed ? "펼치기" : "접기")")
+                .accessibilityValue(isCollapsed ? "접힘" : "펼침")
                 Spacer(minLength: 8)
                 if !completed {
                     Button { addingCategory = category } label: {
@@ -163,11 +187,13 @@ struct TodoListView: View {
                 }
             }
             Divider().padding(.bottom, 4)
-            if tasks.isEmpty {
-                Text("할 일이 없어요")
-                    .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
-            } else {
-                taskRows(tasks)
+            if !isCollapsed {
+                if tasks.isEmpty {
+                    Text("할 일이 없어요")
+                        .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
+                } else {
+                    taskRows(tasks)
+                }
             }
         }
     }
@@ -509,6 +535,7 @@ private struct EditTaskView: View {
 private struct CategoryTaskEntry: View {
     @ObservedObject var model: TodoListModel
     let categoryID: UUID
+    let onAdded: () -> Void
     @State private var title = ""
     @State private var showAsStickyNote = false
     @FocusState private var isFocused: Bool
@@ -546,7 +573,10 @@ private struct CategoryTaskEntry: View {
         let submittedTitle = title
         let sticky = showAsStickyNote
         Task {
-            if await model.add(title: submittedTitle, categoryID: categoryID, showAsStickyNote: sticky) { dismiss() }
+            if await model.add(title: submittedTitle, categoryID: categoryID, showAsStickyNote: sticky) {
+                onAdded()
+                dismiss()
+            }
         }
     }
 }
