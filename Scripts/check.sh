@@ -16,6 +16,11 @@ xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
   -o "$build_dir/layout-tests"
 "$build_dir/layout-tests"
 
+xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
+  Shared/*.swift App/TodoListModel.swift Tests/TodoListModelTests.swift \
+  -o "$build_dir/model-tests"
+"$build_dir/model-tests"
+
 xcrun swiftc -typecheck -swift-version 6 \
   -target "$(uname -m)-apple-macos27.0.1" \
   -module-cache-path "$build_dir/modules" Shared/*.swift App/*.swift
