@@ -43,6 +43,7 @@ struct StickyNoteState: Identifiable, Equatable, Sendable {
 
 struct TodoSnapshot: Equatable, Sendable {
     let tasks: [TodoItem]
+    let upcomingTasks: [TodoItem]
     let stickyNotes: [StickyNoteState]
     let stickyNoteDefaultFontSize: Double
     let categories: [TodoCategory]
@@ -52,9 +53,10 @@ struct TodoSnapshot: Equatable, Sendable {
         tasks: [TodoItem], stickyNotes: [StickyNoteState],
         stickyNoteDefaultFontSize: Double = StickyNoteTypography.defaultFontSize,
         categories: [TodoCategory] = [],
-        reminders: [TodoReminder] = []
+        reminders: [TodoReminder] = [], upcomingTasks: [TodoItem] = []
     ) {
         self.tasks = tasks
+        self.upcomingTasks = upcomingTasks
         self.stickyNotes = stickyNotes
         self.stickyNoteDefaultFontSize = stickyNoteDefaultFontSize
         self.categories = categories
