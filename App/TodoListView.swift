@@ -3,6 +3,8 @@ import SwiftUI
 struct TodoListView: View {
     @ObservedObject var model: TodoListModel
     @ObservedObject var reminders: ReminderCoordinator
+    @State private var listPosition = ScrollPosition(edge: .top)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var newTitle = ""
     @State private var showNewTaskAsStickyNote = false
     @State private var editingTask: TodoItem?
@@ -99,15 +101,16 @@ struct TodoListView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 24) {
-                        ForEach(model.categories) { category in
-                            categorySection(category)
-                        }
+                    LazyVStack(alignment: .leading, spacing: 32) {
+                        statusSection(completed: false)
+                        statusSection(completed: true)
                     }
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.completedTasks.map(\.id))
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
                 }
-                .transaction { $0.animation = nil }
+                .scrollPosition($listPosition)
+                .defaultScrollAnchor(.top, for: .sizeChanges)
             }
         }
         .frame(minWidth: 360, minHeight: 360)
@@ -171,32 +174,50 @@ struct TodoListView: View {
         model.categories.first { $0.id == model.defaultCategoryID }
     }
 
-    private func categorySection(_ category: TodoCategory) -> some View {
-        let tasks = model.tasks.filter { $0.categoryID == category.id }
-        return VStack(alignment: .leading, spacing: 4) {
+    private func statusSection(completed: Bool) -> some View {
+        let tasks = model.tasks.filter { $0.isCompleted == completed }
+        let grouped = Dictionary(grouping: tasks, by: \.categoryID)
+        let categories = model.categories.filter { !completed || !(grouped[$0.id] ?? []).isEmpty }
+        return VStack(alignment: .leading, spacing: 18) {
+            Text(completed ? "한 일" : "할 일")
+                .font(.title2.weight(.bold))
+                .accessibilityAddTraits(.isHeader)
+            ForEach(categories) { category in
+                categorySection(category, tasks: grouped[category.id] ?? [], completed: completed)
+            }
+            if completed && tasks.isEmpty {
+                Text("아직 완료한 일이 없어요")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .id(completed ? "completed-tasks" : "incomplete-tasks")
+    }
+
+    private func categorySection(_ category: TodoCategory, tasks: [TodoItem], completed: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(category.name).font(.headline)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
-                Button { addingCategory = category } label: {
-                    Image(systemName: "plus").frame(width: 24, height: 24)
+                if !completed {
+                    Button { addingCategory = category } label: {
+                        Image(systemName: "plus").frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("\(category.name)에 할 일 추가")
+                    .help("\(category.name)에 할 일 추가")
+                    .disabled(model.isSaving || model.isLoading)
                 }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("\(category.name)에 할 일 추가")
-                .help("\(category.name)에 할 일 추가")
-                .disabled(model.isSaving || model.isLoading)
             }
             Divider().padding(.bottom, 4)
             if tasks.isEmpty {
                 Text("할 일이 없어요")
                     .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
             } else {
-                taskSection("할 일", tasks: tasks.filter { !$0.isCompleted })
-                taskSection("완료", tasks: tasks.filter(\.isCompleted), topSpacing: 8)
+                taskRows(tasks)
             }
         }
-        .id(category.id)
     }
 
     private var stickyManagementMenu: some View {
@@ -256,28 +277,17 @@ struct TodoListView: View {
         }
     }
 
-    @ViewBuilder
-    private func taskSection(_ title: String, tasks: [TodoItem], topSpacing: CGFloat = 0) -> some View {
-        if !tasks.isEmpty {
-            Section {
-                ForEach(tasks) { task in
-                    TodoTaskRow(
-                        model: model,
-                        taskID: task.id,
-                        edit: { editingTask = $0 },
-                        delete: { deletingTask = $0 },
-                        editReminder: { reminderTask = $0 },
-                        didMoveCategory: showCategoryMoveNotice
-                    )
-                }
-            } header: {
-                if title == "완료" {
-                    Text("오늘 완료 · \(tasks.count)")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.top, topSpacing).padding(.bottom, 4)
-                }
-            }
+    private func taskRows(_ tasks: [TodoItem]) -> some View {
+        ForEach(tasks) { task in
+            TodoTaskRow(
+                model: model,
+                taskID: task.id,
+                edit: { editingTask = $0 },
+                delete: { deletingTask = $0 },
+                editReminder: { reminderTask = $0 },
+                didMoveCategory: showCategoryMoveNotice
+            )
+            .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
         }
     }
 
