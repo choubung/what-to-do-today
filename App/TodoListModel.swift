@@ -18,6 +18,10 @@ private actor TodoRepository {
         try connection().fetchSnapshot(dayRange: Calendar.autoupdatingCurrent.dateInterval(of: .day, for: Date()))
     }
 
+    func fetchCompletedTasks(in range: DateInterval, categoryID: UUID?) throws -> [TodoItem] {
+        try connection().fetchCompletedTasks(in: range, categoryID: categoryID)
+    }
+
     func add(title: String, categoryID: UUID?, showAsStickyNote: Bool) throws {
         try connection().addTask(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote)
     }
@@ -112,6 +116,7 @@ final class TodoListModel: ObservableObject {
     @Published private(set) var snapshot = TodoSnapshot(tasks: [], stickyNotes: [])
     @Published private(set) var isLoading = true
     @Published private(set) var isSaving = false
+    @Published private(set) var completionHistoryRevision: UInt = 0
     @Published private var pendingCompletions: [UUID: Bool] = [:]
     @Published var errorMessage: String?
 
@@ -187,6 +192,8 @@ final class TodoListModel: ObservableObject {
                     // A newer request may follow a write that this read did not yet see.
                     guard !refreshRequested else { continue }
                     if snapshot != currentSnapshot { snapshot = currentSnapshot }
+                    // A historical task can change without changing today's snapshot.
+                    completionHistoryRevision &+= 1
                 } catch {
                     guard !refreshRequested else { continue }
                     present(error)
@@ -197,6 +204,10 @@ final class TodoListModel: ObservableObject {
         }
         refreshTask = task
         await task.value
+    }
+
+    func completedTasks(in range: DateInterval, categoryID: UUID? = nil) async throws -> [TodoItem] {
+        try await repository.fetchCompletedTasks(in: range, categoryID: categoryID)
     }
 
     func add(title: String, categoryID: UUID? = nil, showAsStickyNote: Bool = false) async -> Bool {

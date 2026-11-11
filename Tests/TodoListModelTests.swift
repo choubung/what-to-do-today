@@ -208,6 +208,44 @@ private enum TodoListModelTests {
         await model.setStickyFontSize(id: first.id, fontSize: nil)
         let inherited = model.stickyNotes.first { $0.id == first.id }!
         precondition(model.effectiveStickyFontSize(for: inherited) == 22)
+        // Past completions are queried separately; undo returns them to today's list.
+        let historyTask = try store.addTask(title: "previous completion")
+        let calendar = Calendar.autoupdatingCurrent
+        let todayStart = calendar.startOfDay(for: Date())
+        let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart)!
+        let historyRange = DateInterval(start: yesterdayStart, end: todayStart)
+        precondition(sqlite3_exec(lockConnection, """
+            UPDATE todos SET completed_at = \(yesterdayStart.addingTimeInterval(3600).timeIntervalSince1970)
+            WHERE id = '\(historyTask.id.uuidString)'
+            """, nil, nil, nil) == SQLITE_OK)
+        await model.refresh()
+        precondition(!model.tasks.contains { $0.id == historyTask.id }, "Past completions must stay out of today's list")
+        let history = try await model.completedTasks(in: historyRange, categoryID: destinationID)
+        precondition(history.count == 1 && history[0].id == historyTask.id)
+        let oldRevision = model.completionHistoryRevision
+        precondition(sqlite3_exec(lockConnection, """
+            UPDATE todos SET title = 'updated history' WHERE id = '\(historyTask.id.uuidString)'
+            """, nil, nil, nil) == SQLITE_OK)
+        await model.refresh()
+        precondition(model.completionHistoryRevision != oldRevision,
+                     "A history-only change must refresh the calendar even when today's snapshot is unchanged")
+        let updatedHistory = try await model.completedTasks(in: historyRange, categoryID: destinationID)
+        precondition(updatedHistory[0].title == "updated history")
+        let restored = await model.setCompleted(updatedHistory[0], completed: false)
+        precondition(restored && model.incompleteTasks.contains { $0.id == historyTask.id })
+        let afterRestore = try await model.completedTasks(in: historyRange)
+        precondition(afterRestore.isEmpty)
+        precondition(sqlite3_exec(lockConnection, """
+            UPDATE todos SET completed_at = \(yesterdayStart.addingTimeInterval(3600).timeIntervalSince1970)
+            WHERE id = '\(historyTask.id.uuidString)'
+            """, nil, nil, nil) == SQLITE_OK)
+        await model.refresh()
+        let beforeDelete = try await model.completedTasks(in: historyRange)
+        let deletedHistory = await model.delete(beforeDelete[0])
+        precondition(deletedHistory)
+        let afterDelete = try await model.completedTasks(in: historyRange)
+        precondition(afterDelete.isEmpty && !model.tasks.contains { $0.id == historyTask.id })
+
         withExtendedLifetime(subscription) {}
         print("TodoListModelTests passed")
     }
