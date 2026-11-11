@@ -8,6 +8,7 @@ fail() {
 
 if [[ $# -gt 1 || "${1:-}" == "--help" ]]; then
     printf '사용법: %s [서명된 .app 경로]\n' "$0"
+    [[ $# -le 1 ]] || exit 2
     exit 0
 fi
 
@@ -23,7 +24,7 @@ user_id="$(id -u)"
 [[ "$user_id" != 0 ]] || fail '로그인한 Mac 사용자로 설치 스크립트를 실행해 주세요.'
 [[ -d "$source_app" ]] || fail "앱 번들을 찾을 수 없어요: $source_app"
 source_app="$(cd -- "$source_app" && pwd -P)"
-[[ "$source_app" != "$destination" ]] || fail '설치할 새 앱 번들 경로를 입력해 주세요.'
+[[ ! "$source_app" -ef "$destination" ]] || fail '설치할 새 앱 번들 경로를 입력해 주세요.'
 [[ ! -L "$destination" ]] || fail '응용 프로그램 폴더의 앱이 심볼릭 링크예요. 기존 설치 경로를 확인해 주세요.'
 
 verify_bundle() {
@@ -81,23 +82,28 @@ if [[ -e "$destination" ]]; then
 fi
 ensure_app_closed
 
-staging="$(mktemp -d /Applications/.what-to-do-today-install.XXXXXX)"
-backup="$staging/previous.app"
+install_lock='/Applications/.what-to-do-today-install.lock'
+mkdir "$install_lock" 2>/dev/null || fail '설치가 이미 진행 중이거나 응용 프로그램 폴더에 쓸 수 없어요.'
+staging=''
+backup=''
 cleanup() {
     local status=$?
-    if [[ -e "$backup" && ! -e "$destination" ]]; then
+    if [[ -n "$backup" && -e "$backup" && ! -e "$destination" ]]; then
         if ! mv "$backup" "$destination"; then
             printf '기존 앱 복구 위치: %s\n' "$backup" >&2
             return 1
         fi
     fi
-    rm -rf -- "$staging"
+    if [[ -n "$staging" ]]; then rm -rf -- "$staging"; fi
+    rmdir "$install_lock"
     return "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+staging="$(mktemp -d /Applications/.what-to-do-today-install.XXXXXX)"
+backup="$staging/previous.app"
 ditto "$source_app" "$staging/$app_name"
 verify_bundle "$staging/$app_name" || fail '복사한 앱의 서명이 올바르지 않아요.'
 ensure_app_closed

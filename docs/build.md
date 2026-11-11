@@ -1,6 +1,6 @@
 # 직접 빌드하기
 
-macOS 27.0.1 이상과 macOS 27 SDK를 포함한 Xcode가 필요합니다. [GitHub 릴리즈](https://github.com/choubung/what-to-do-today/releases/latest)에서 소스를 받거나 저장소를 복제하세요.
+macOS 27.0.1 이상과 macOS 27 SDK를 포함한 Xcode가 필요합니다. [v1.3.0 소스 ZIP 다운로드](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.0.zip)에서 소스를 받고 압축을 푸세요.
 
 저장소 루트에 `Signing.xcconfig`를 만들고 Xcode 계정의 Team ID를 입력합니다.
 

@@ -10,24 +10,25 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/choubung/what-to-do-today/releases/latest"><strong>최신 릴리즈 받기</strong></a>
-  · <a href="docs/build.md">Xcode로 설치하기</a><br>
-  <sub>macOS 27.0.1 이상 · 앱 사용에 계정 가입 불필요</sub>
+  <a href="https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.0.zip"><strong>v1.3.0 소스 ZIP 다운로드</strong></a>
+  · <a href="docs/build.md">설치 안내</a>
+  · <a href="https://github.com/choubung/what-to-do-today/releases/latest">최신 릴리즈</a><br>
+  <sub>macOS 27.0.1 이상 · Xcode로 빌드하는 소스 배포</sub>
 </p>
 
 <p align="center">
-  <img src="docs/images/app-preview.png" width="480" alt="일상과 업무 카테고리의 할 일과 완료 항목을 보여주는 앱 화면">
+  <img src="docs/images/app-preview.png" width="480" alt="오늘 할 일, 완료한 항목, 예정된 할 일을 보여주는 앱 화면">
 </p>
 
-## 시작하기
+## 설치하고 시작하기
 
-1. 릴리즈에 DMG가 있으면 열어서 **Install What to Do Today.command**를 실행합니다. 소스로 설치하려면 Xcode에서 빌드한 뒤 설치 스크립트를 실행하세요. [최신 릴리즈](https://github.com/choubung/what-to-do-today/releases/latest) · [빌드 및 설치 안내](docs/build.md)
-2. 앱의 **할 일**에서 카테고리 옆 **＋**를 눌러 첫 항목을 추가합니다. 새 카테고리는 **카테고리 관리**에서 만들 수 있습니다.
-3. 바탕화면을 우클릭하고 **위젯 편집**에서 **할 일** 위젯을 추가합니다. 중형은 한 페이지에 3개, 대형은 8개를 표시합니다.
+1. 위 소스 ZIP을 내려받아 압축을 풀고, [설치 안내](docs/build.md)에 따라 Xcode로 빌드한 뒤 설치합니다.
+2. 앱의 **할 일**에서 카테고리 옆 **＋**로 첫 항목을 추가합니다. 내일 할 일이라면 **날짜 지정**을 켭니다.
+3. 바탕화면을 우클릭하고 **위젯 편집**에서 **할 일** 위젯을 추가합니다. 위젯에서도 완료를 체크하거나 새 할 일을 적을 수 있습니다.
 
 `⌘N`으로 작은 입력 창을, `⌘1`으로 목록을 엽니다. 위젯의 **＋**도 작은 입력 창을 엽니다.
 
-업데이트할 때는 앱을 `⌘Q`로 종료하고 같은 설치 도구를 실행하세요. 새 앱을 설치한 뒤 이전 위젯 프로세스를 종료하고 목록을 다시 불러옵니다.
+이미 설치했다면 앱을 `⌘Q`로 종료하고 [업데이트 절차](docs/build.md#설치-및-업데이트)를 따르세요. 설치 도구가 위젯도 함께 다시 시작합니다.
 
 ## 이렇게 사용하세요
 
