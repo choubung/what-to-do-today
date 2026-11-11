@@ -1,7 +1,7 @@
 import SwiftUI
 import WidgetKit
 
-private let todoWidgetTitle = "To Do"
+private let todoWidgetTitle = "할 일"
 
 struct TodoWidgetEntry: TimelineEntry {
     let date: Date
