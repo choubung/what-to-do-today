@@ -126,7 +126,175 @@ private enum TaskStoreTests {
         try testStickyNoteConcurrency(in: directory)
         try testAddTaskWithStickyNote(in: directory)
         try testDayFiltering(in: directory)
+        try testStickySizePersistence(in: directory)
+        try testStickyFontPersistence(in: directory)
         print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, concurrency, and sticky-note migration/state tests.")
+    }
+
+    private static func testStickyFontPersistence(in directory: URL) throws {
+        let url = directory.appendingPathComponent("legacy-p1-font.sqlite")
+        let id = UUID()
+        try executeLegacySQL("""
+            CREATE TABLE todos (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL,
+                created_at REAL NOT NULL, completed_at REAL
+            );
+            CREATE TABLE sticky_notes (
+                todo_id TEXT PRIMARY KEY NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+                is_visible INTEGER NOT NULL DEFAULT 0,
+                is_always_on_top INTEGER NOT NULL DEFAULT 0,
+                position_x REAL, position_y REAL, display_id TEXT, width REAL, height REAL
+            );
+            INSERT INTO todos VALUES ('\(id.uuidString)', '글자 크기 설정 전 포스트잇', 100, NULL);
+            INSERT INTO sticky_notes VALUES ('\(id.uuidString)', 0, 1, -25, 100, 'external', 310, 230);
+            """, at: url)
+        let store = try TodoStore(databaseURL: url)
+        let migrated = try store.fetchSnapshot()
+        let originalNote = StickyNoteState(
+            id: id, isVisible: false, isAlwaysOnTop: true,
+            position: StickyNotePosition(x: -25, y: 100, displayID: "external"),
+            size: StickyNoteSize(width: 310, height: 230)
+        )
+        try expect(migrated.stickyNotes == [originalNote] && migrated.stickyNoteDefaultFontSize == 17, "Font migration must preserve note geometry and state while inheriting the original 17-point default")
+        let second = try store.addTask(title: "새 포스트잇", showAsStickyNote: true)
+        try expect(try store.fetchSnapshot().stickyNotes.first { $0.id == second.id }?.fontSize == nil, "New notes must inherit the common font size")
+        try store.saveStickyFontSize(id: second.id, fontSize: 23)
+        try store.saveDefaultStickyFontSize(21)
+        let customized = try store.fetchSnapshot()
+        let effectiveSizes = Dictionary(uniqueKeysWithValues: customized.stickyNotes.map {
+            ($0.id, $0.fontSize ?? customized.stickyNoteDefaultFontSize)
+        })
+        try expect(effectiveSizes[id] == 21 && effectiveSizes[second.id] == 23, "Changing the common font size must affect inheriting notes while preserving individual overrides")
+        try expect(try TodoStore(databaseURL: url).fetchSnapshot() == customized, "The common size and individual overrides must both survive reopening")
+        try store.saveStickyFontSize(id: second.id, fontSize: nil)
+        let cleared = try store.fetchSnapshot()
+        try expect(cleared.stickyNotes.allSatisfy { $0.fontSize == nil } && cleared.stickyNoteDefaultFontSize == 21, "Clearing an override must restore inheritance without changing the common setting")
+
+        for validSize in [12.0, 32.0] {
+            try store.saveDefaultStickyFontSize(validSize)
+            try store.saveStickyFontSize(id: second.id, fontSize: validSize)
+            let boundary = try store.fetchSnapshot()
+            try expect(boundary.stickyNoteDefaultFontSize == validSize && boundary.stickyNotes.first { $0.id == second.id }?.fontSize == validSize, "Both inclusive font-size bounds must be accepted")
+        }
+        let beforeInvalid = try store.fetchSnapshot()
+        for invalidSize in [11.0, 33.0, Double.nan, Double.infinity, -Double.infinity] {
+            do {
+                try store.saveStickyFontSize(id: second.id, fontSize: invalidSize)
+                throw TestFailure(description: "Invalid individual font size was accepted")
+            } catch TodoStoreError.invalidFontSize {}
+            do {
+                try store.saveDefaultStickyFontSize(invalidSize)
+                throw TestFailure(description: "Invalid common font size was accepted")
+            } catch TodoStoreError.invalidFontSize {}
+        }
+        try expect(try store.fetchSnapshot() == beforeInvalid, "Rejected font sizes must preserve all saved note and common settings")
+
+        try store.saveStickyFontSize(id: id, fontSize: 25)
+        let hidden = try store.fetchSnapshot().stickyNotes.first { $0.id == id }
+        try expect(hidden?.isVisible == false && hidden?.position == originalNote.position && hidden?.size == originalNote.size && hidden?.isAlwaysOnTop == true, "Changing a hidden note's font must preserve its visibility, size, position, and pinning")
+        try store.showStickyNotes(ids: [id])
+        try expect(try store.fetchSnapshot().stickyNotes.first { $0.id == id }?.fontSize == 25, "Showing a note must preserve its font override")
+        try store.setCompleted(id: id, completed: true)
+        try store.saveStickyFontSize(id: id, fontSize: 26)
+        try store.setCompleted(id: id, completed: false)
+        let undone = try store.fetchSnapshot().stickyNotes.first { $0.id == id }
+        try expect(undone?.fontSize == 26 && undone?.isVisible == false, "A delayed font update and completion undo must not reopen a note")
+        try store.deleteTask(id: id)
+        try store.saveStickyFontSize(id: id, fontSize: 20)
+        try store.saveStickyFontSize(id: id, fontSize: nil)
+        try expect(try store.fetchSnapshot().stickyNotes.allSatisfy { $0.id != id }, "A font update after deletion must not recreate a note")
+
+        let legacyOverrideURL = directory.appendingPathComponent("legacy-font-override.sqlite")
+        try executeLegacySQL("""
+            CREATE TABLE todos (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL,
+                created_at REAL NOT NULL, completed_at REAL
+            );
+            CREATE TABLE sticky_notes (
+                todo_id TEXT PRIMARY KEY NOT NULL,
+                is_visible INTEGER NOT NULL, is_always_on_top INTEGER NOT NULL,
+                position_x REAL, position_y REAL, display_id TEXT, font_size REAL
+            );
+            INSERT INTO todos VALUES ('\(id.uuidString)', '기존 개별 글자 크기', 100, NULL);
+            INSERT INTO sticky_notes VALUES ('\(id.uuidString)', 1, 0, NULL, NULL, NULL, 19);
+            """, at: legacyOverrideURL)
+        let legacyOverride = try TodoStore(databaseURL: legacyOverrideURL).fetchSnapshot()
+        try expect(legacyOverride.stickyNotes.first?.fontSize == 19 && legacyOverride.stickyNoteDefaultFontSize == 17, "An existing individual font value must survive additive migration")
+    }
+
+    private static func testStickySizePersistence(in directory: URL) throws {
+        let url = directory.appendingPathComponent("legacy-p1-size.sqlite")
+        let id = UUID()
+        try executeLegacySQL("""
+            CREATE TABLE todos (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL,
+                created_at REAL NOT NULL, completed_at REAL
+            );
+            CREATE TABLE sticky_notes (
+                todo_id TEXT PRIMARY KEY NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+                is_visible INTEGER NOT NULL DEFAULT 0 CHECK (is_visible IN (0, 1)),
+                is_always_on_top INTEGER NOT NULL DEFAULT 0 CHECK (is_always_on_top IN (0, 1)),
+                position_x REAL, position_y REAL, display_id TEXT,
+                CHECK ((position_x IS NULL AND position_y IS NULL)
+                    OR (position_x IS NOT NULL AND position_y IS NOT NULL))
+            );
+            INSERT INTO todos VALUES ('\(id.uuidString)', '기존 포스트잇', 100, NULL);
+            INSERT INTO sticky_notes VALUES ('\(id.uuidString)', 0, 1, -25, 100, 'external');
+            """, at: url)
+
+        let migrationFailures = ConcurrentFailures()
+        DispatchQueue.concurrentPerform(iterations: 2) { _ in
+            do {
+                _ = try TodoStore(databaseURL: url).fetchSnapshot()
+            } catch {
+                migrationFailures.append(error)
+            }
+        }
+        try migrationFailures.check()
+        let store = try TodoStore(databaseURL: url)
+        let position = StickyNotePosition(x: -25, y: 100, displayID: "external")
+        let migrated = try store.fetchSnapshot()
+        try expect(migrated.tasks == [TodoItem(id: id, title: "기존 포스트잇", createdAt: Date(timeIntervalSince1970: 100), completedAt: nil)], "Size migration must preserve every task field")
+        try expect(migrated.stickyNotes == [StickyNoteState(id: id, isVisible: false, isAlwaysOnTop: true, position: position)], "Existing notes must preserve visibility, pinning, and position with an unset size")
+
+        let size = StickyNoteSize(width: 310, height: 230)
+        try store.saveStickySize(id: id, size: size)
+        let resized = try store.fetchSnapshot()
+        try expect(resized.tasks == migrated.tasks && resized.stickyNotes == [StickyNoteState(id: id, isVisible: false, isAlwaysOnTop: true, position: position, size: size)], "A delayed resize must only update size, including while hidden")
+        try expect(try TodoStore(databaseURL: url).fetchSnapshot() == resized, "Saved size must survive reopening and repeated schema configuration")
+
+        for invalidSize in [
+            StickyNoteSize(width: 0, height: 100),
+            StickyNoteSize(width: 100, height: -1),
+            StickyNoteSize(width: .nan, height: 100),
+            StickyNoteSize(width: 100, height: .infinity)
+        ] {
+            do {
+                try store.saveStickySize(id: id, size: invalidSize)
+                throw TestFailure(description: "Invalid note size was accepted")
+            } catch TodoStoreError.invalidSize {}
+        }
+        try expect(try store.fetchSnapshot() == resized, "Invalid sizes must leave all saved state unchanged")
+
+        let movedPosition = StickyNotePosition(x: 50, y: 75, displayID: nil)
+        try store.saveStickyPosition(id: id, position: movedPosition)
+        try store.showStickyNotes(ids: [id])
+        let shown = try store.fetchSnapshot().stickyNotes.first
+        try expect(shown?.size == size && shown?.position == movedPosition && shown?.isVisible == true, "Moving and showing a note must preserve its size")
+        try store.setCompleted(id: id, completed: true)
+        let lateSize = StickyNoteSize(width: 360, height: 270)
+        try store.saveStickySize(id: id, size: lateSize)
+        try store.setCompleted(id: id, completed: false)
+        let afterUndo = try store.fetchSnapshot().stickyNotes.first
+        try expect(afterUndo?.size == lateSize && afterUndo?.isVisible == false && afterUndo?.position == movedPosition, "A late resize and completion undo must never reopen a note")
+
+        try store.deleteTask(id: id)
+        try store.saveStickySize(id: id, size: size)
+        let afterDelete = try store.fetchSnapshot()
+        try expect(afterDelete.tasks.isEmpty && afterDelete.stickyNotes.isEmpty, "Resizing after deletion must not recreate a task or note")
+        let listOnlyTask = try store.addTask(title: "포스트잇 없는 할 일")
+        try store.saveStickySize(id: listOnlyTask.id, size: size)
+        try expect(try store.fetchSnapshot().stickyNotes.isEmpty, "Saving size without an existing note must remain a no-op")
     }
 
     private static func testDayFiltering(in directory: URL) throws {

@@ -26,11 +26,30 @@ private enum StickyNoteLayoutTests {
         try expect(restored.frame.origin == CGPoint(x: -1200, y: 300), "Negative external-monitor coordinates must survive restore")
         try expect(restored.displayID == "left", "Saved monitor should be preferred while connected")
 
+        let resized = StickyNoteLayout.placement(
+            savedOrigin: restored.frame.origin, displayID: "left",
+            size: CGSize(width: 520, height: 360), screens: [main, left]
+        )!
+        try expect(resized.frame.size == CGSize(width: 520, height: 360), "Restoring a resized note must preserve both dimensions")
+        try expect(resized.frame.origin == restored.frame.origin, "Restoring a resized note must preserve its saved position")
+
+        let undersized = StickyNoteLayout.placement(
+            savedOrigin: CGPoint(x: 100, y: 100), displayID: "main",
+            size: CGSize(width: 80, height: 60), screens: [main]
+        )!
+        try expect(undersized.frame.size == StickyNoteLayout.minimumSize, "Notes restored below the readable minimum must grow to that minimum")
+
         let removed = StickyNoteLayout.placement(
             savedOrigin: restored.frame.origin, displayID: "left", size: size, screens: [main]
         )!
         try expect(main.visibleFrame.contains(removed.frame), "A disconnected monitor must not leave the note offscreen")
         try expect(removed.displayID == "main", "Disconnected display must map to the remaining monitor")
+
+        let largeRemoved = StickyNoteLayout.placement(
+            savedOrigin: resized.frame.origin, displayID: "left",
+            size: CGSize(width: 1800, height: 1000), screens: [main]
+        )!
+        try expect(largeRemoved.frame == main.visibleFrame, "A resized note larger than the remaining monitor must fit its visible bounds")
 
         let overlapping = StickyNoteLayout.placement(
             savedOrigin: CGPoint(x: -250, y: 350), displayID: "gone", size: size, screens: [main, left]
@@ -59,8 +78,9 @@ private enum StickyNoteLayoutTests {
             try expect(main.visibleFrame.contains(placement.frame), "Every cascaded note must remain onscreen")
         }
         try expect(StickyNoteLayout.placement(savedOrigin: nil, displayID: nil, size: size, screens: []) == nil, "No screens must be handled without a crash")
+        try expect(StickyNoteLayout.placement(savedOrigin: nil, displayID: nil, size: CGSize(width: CGFloat.infinity, height: 100), screens: [main]) == nil, "Nonfinite saved sizes must not create an invalid window")
         let invalidOrigin = StickyNoteLayout.placement(savedOrigin: CGPoint(x: CGFloat.nan, y: 0), displayID: nil, size: size, screens: [main])!
         try expect(main.visibleFrame.contains(invalidOrigin.frame), "Invalid stored coordinates should use a safe default")
-        print("Passed sticky-note restore, monitor removal, negative coordinates, bounds, and cascade tests.")
+        print("Passed sticky-note position/size restore, minimum size, monitor removal, negative coordinates, bounds, and cascade tests.")
     }
 }

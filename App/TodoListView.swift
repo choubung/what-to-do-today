@@ -7,6 +7,7 @@ struct TodoListView: View {
     @State private var editingTask: TodoItem?
     @State private var deletingTask: TodoItem?
     @State private var showingStickyPicker = false
+    @State private var isSavingFontSize = false
     @FocusState private var isEntryFocused: Bool
     @Environment(\.controlActiveState) private var controlActiveState
 
@@ -31,7 +32,7 @@ struct TodoListView: View {
             }
             .padding(16)
 
-            Toggle("포스트잇으로 띄우기", isOn: $showNewTaskAsStickyNote)
+            Toggle("추가 후 포스트잇 표시", isOn: $showNewTaskAsStickyNote)
                 .toggleStyle(.checkbox)
                 .controlSize(.small)
                 .disabled(model.isSaving)
@@ -40,22 +41,14 @@ struct TodoListView: View {
                 .padding(.bottom, 12)
 
             HStack {
-                Button("포스트잇 띄우기", systemImage: "note") {
-                    showingStickyPicker = true
-                }
-                .disabled(model.incompleteTasks.isEmpty || model.isSaving)
+                Text("오늘의 목록")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 Spacer()
-                Button("모두 숨기기", systemImage: "eye.slash") {
-                    Task { _ = await model.hideAllStickyNotes() }
-                }
-                .disabled(model.visibleStickyCount == 0 || model.isSaving)
-                .help("할 일의 완료 상태를 바꾸지 않고 모든 포스트잇을 숨깁니다.")
+                stickyManagementMenu
             }
-            .controlSize(.small)
             .padding(.horizontal, 16)
-            .padding(.bottom, 12)
-
-            Divider()
+            .padding(.vertical, 10)
 
             if model.isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -67,11 +60,17 @@ struct TodoListView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    taskSection("할 일", tasks: model.incompleteTasks)
-                    taskSection("완료", tasks: model.completedTasks)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        taskSection("할 일", tasks: model.incompleteTasks)
+                        taskSection(
+                            "완료", tasks: model.completedTasks,
+                            topSpacing: model.incompleteTasks.isEmpty ? 0 : 24
+                        )
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
                 }
-                .listStyle(.inset)
                 .transaction { $0.animation = nil }
             }
         }
@@ -109,8 +108,65 @@ struct TodoListView: View {
         .onAppear { isEntryFocused = true }
     }
 
+    private var stickyManagementMenu: some View {
+        Menu {
+            Button("할 일 선택해서 띄우기…", systemImage: "note") {
+                showingStickyPicker = true
+            }
+            .disabled(model.incompleteTasks.isEmpty || model.isSaving)
+
+            Button("모두 숨기기", systemImage: "eye.slash") {
+                Task { _ = await model.hideAllStickyNotes() }
+            }
+            .disabled(model.visibleStickyCount == 0 || model.isSaving)
+            .help("할 일의 완료 상태를 바꾸지 않고 모든 포스트잇을 숨깁니다.")
+
+            Divider()
+            Menu("기본 글자 크기") {
+                Text("현재 \(model.defaultStickyFontSize.formatted()) pt")
+                Divider()
+                Button("작게") {
+                    changeDefaultStickyFontSize(max(
+                        StickyNoteTypography.minimumFontSize,
+                        model.defaultStickyFontSize - StickyNoteTypography.fontSizeStep
+                    ))
+                }
+                .disabled(model.defaultStickyFontSize <= StickyNoteTypography.minimumFontSize)
+
+                Button("크게") {
+                    changeDefaultStickyFontSize(min(
+                        StickyNoteTypography.maximumFontSize,
+                        model.defaultStickyFontSize + StickyNoteTypography.fontSizeStep
+                    ))
+                }
+                .disabled(model.defaultStickyFontSize >= StickyNoteTypography.maximumFontSize)
+
+                Divider()
+                Button("기본값 (\(StickyNoteTypography.defaultFontSize.formatted()) pt)") {
+                    changeDefaultStickyFontSize(StickyNoteTypography.defaultFontSize)
+                }
+                .disabled(model.defaultStickyFontSize == StickyNoteTypography.defaultFontSize)
+            }
+            .disabled(isSavingFontSize)
+        } label: {
+            Label("포스트잇 관리", systemImage: "note")
+        }
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
+        .fixedSize()
+    }
+
+    private func changeDefaultStickyFontSize(_ fontSize: Double) {
+        guard !isSavingFontSize else { return }
+        isSavingFontSize = true
+        Task {
+            defer { isSavingFontSize = false }
+            await model.setDefaultStickyFontSize(fontSize)
+        }
+    }
+
     @ViewBuilder
-    private func taskSection(_ title: String, tasks: [TodoItem]) -> some View {
+    private func taskSection(_ title: String, tasks: [TodoItem], topSpacing: CGFloat = 0) -> some View {
         if !tasks.isEmpty {
             Section {
                 ForEach(tasks) { task in
@@ -146,6 +202,7 @@ struct TodoListView: View {
                         .accessibilityLabel("\(task.title) 옵션")
                     }
                     .padding(.vertical, 7)
+                    .contentShape(Rectangle())
                     .contextMenu {
                         stickyActions(for: task)
                         Button("수정", systemImage: "pencil") { editingTask = task }
@@ -155,10 +212,15 @@ struct TodoListView: View {
                     }
                 }
             } header: {
-                Text("\(title) · \(tasks.count)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("\(title) · \(tasks.count)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .accessibilityAddTraits(.isHeader)
+                    Divider()
+                }
+                .padding(.top, topSpacing)
+                .padding(.bottom, 4)
             }
         }
     }
@@ -247,6 +309,7 @@ private struct StickyNotePickerView: View {
                     .toggleStyle(.checkbox)
                     .disabled(model.isSaving)
                     .padding(.vertical, 4)
+                    .listRowSeparator(.hidden)
                 }
                 .listStyle(.inset)
                 .frame(minHeight: 140, idealHeight: 240, maxHeight: 320)
@@ -349,7 +412,7 @@ struct QuickAddView: View {
                 Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
             }
             HStack {
-                Toggle("포스트잇으로 띄우기", isOn: $showAsStickyNote)
+                Toggle("추가 후 포스트잇 표시", isOn: $showAsStickyNote)
                     .toggleStyle(.checkbox)
                     .controlSize(.small)
                     .disabled(model.isSaving)
