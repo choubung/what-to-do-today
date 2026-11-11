@@ -78,6 +78,7 @@ struct StickyNoteView: View {
         .background(Color(nsColor: StickyNoteAppearance.background))
         .contentShape(Rectangle())
         .contextMenu { noteContextMenu }
+        .allowsWindowActivationEvents()
     }
 
     private var controls: some View {
@@ -191,6 +192,8 @@ private struct StickyNoteDragArea: NSViewRepresentable {
         required init?(coder: NSCoder) { nil }
 
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var needsPanelToBecomeKey: Bool { true }
+        override var acceptsFirstResponder: Bool { true }
 
         override func resetCursorRects() {
             addCursorRect(bounds, cursor: .openHand)
