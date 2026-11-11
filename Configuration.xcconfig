@@ -1,0 +1,2 @@
+// Local signing settings apply to the app and widget in both build configurations.
+#include? "Signing.xcconfig"
