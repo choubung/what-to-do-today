@@ -8,7 +8,15 @@ P0는 할 일 추가·수정·삭제·완료 취소와 시스템 위젯을 제�
 
 ## 개발 및 실행
 
-`WhatToDoToday.xcodeproj`를 Xcode에서 열고 `WhatToDoToday` 스킴을 실행합니다. 앱의 Signing & Capabilities에서 사용할 개발 팀을 선택하고 `group.com.choubung.whattodotoday` App Group을 등록합니다. 앱은 App Group의 `Tasks.sqlite` 파일에 저장합니다.
+저장소 루트에 `Signing.xcconfig`를 만들고 Xcode 계정의 Team ID를 입력합니다.
+
+```xcconfig
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+```
+
+이 파일은 Git에서 제외됩니다. 공통 `Configuration.xcconfig`가 이를 읽어 Debug·Release 빌드에 팀을 적용합니다. Xcode와 명령줄 빌드 모두 이 설정을 사용합니다.
+
+`WhatToDoToday.xcodeproj`를 Xcode에서 열고 `WhatToDoToday` 스킴을 실행합니다. 앱의 Signing & Capabilities에서 자동 서명과 `group.com.choubung.whattodotoday` App Group을 확인합니다. 앱은 App Group의 `Tasks.sqlite` 파일에 저장합니다.
 
 메인 창에서 할 일을 추가하고 체크박스로 완료하거나 완료를 취소합니다. 행의 메뉴에서 제목을 수정하거나 삭제합니다. `⌘N`은 작은 입력 창을, `⌘1`은 목록 창을 엽니다. `whattodotoday://add` URL로도 입력 창을 열 수 있습니다.
 
