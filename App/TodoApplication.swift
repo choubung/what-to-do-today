@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import WidgetKit
 
 @main
 @MainActor
@@ -21,10 +22,13 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     private var openedFromURL = false
     private lazy var stickyNotes = StickyNoteCoordinator(model: model)
     private var isPreparingToTerminate = false
+    private var dayBoundaryTimer: Timer?
+    private var trackedDayRange: DateInterval?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenu()
         _ = stickyNotes
+        configureDateTracking()
         // URL launch events arrive during startup. Defer the default window until they are handled.
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.openedFromURL else { return }
@@ -48,7 +52,9 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        let dayChanged = scheduleDayBoundary()
         Task { await model.refresh() }
+        if dayChanged { WidgetCenter.shared.reloadTimelines(ofKind: "WhatToDoTodayWidget") }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -57,6 +63,12 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        dayBoundaryTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !isPreparingToTerminate else { return .terminateLater }
@@ -71,6 +83,47 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func hideAllStickyNotes() {
         Task { _ = await model.hideAllStickyNotes() }
+    }
+
+    private func configureDateTracking() {
+        for name in [Notification.Name.NSCalendarDayChanged, .NSSystemTimeZoneDidChange, .NSSystemClockDidChange] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(localTimeChanged(_:)), name: name, object: nil
+            )
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(localTimeChanged(_:)), name: NSWorkspace.didWakeNotification, object: nil
+        )
+        _ = scheduleDayBoundary()
+    }
+
+    @objc private nonisolated func localTimeChanged(_ notification: Notification) {
+        Task { @MainActor [weak self] in self?.refreshForLocalTimeChange() }
+    }
+
+    private func refreshForLocalTimeChange() {
+        guard !isPreparingToTerminate else { return }
+        _ = scheduleDayBoundary()
+        Task { await model.refresh() }
+        WidgetCenter.shared.reloadTimelines(ofKind: "WhatToDoTodayWidget")
+    }
+
+    /// Uses the actual local day's end, including days shortened or lengthened by clock changes.
+    @discardableResult
+    private func scheduleDayBoundary() -> Bool {
+        dayBoundaryTimer?.invalidate()
+        dayBoundaryTimer = nil
+        let dayRange = Calendar.autoupdatingCurrent.dateInterval(of: .day, for: Date())
+        let changed = dayRange != trackedDayRange
+        trackedDayRange = dayRange
+        guard let dayRange else { return changed }
+
+        let timer = Timer(fire: dayRange.end, interval: 0, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.refreshForLocalTimeChange() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        dayBoundaryTimer = timer
+        return changed
     }
 
     @objc private func showMainWindow() {

@@ -125,7 +125,64 @@ private enum TaskStoreTests {
         try testStickyNotePersistence(in: directory)
         try testStickyNoteConcurrency(in: directory)
         try testAddTaskWithStickyNote(in: directory)
+        try testDayFiltering(in: directory)
         print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, concurrency, and sticky-note migration/state tests.")
+    }
+
+    private static func testDayFiltering(in directory: URL) throws {
+        let days = [
+            (zone: "Asia/Seoul", month: 11, day: 11, hours: 24),
+            (zone: "America/New_York", month: 3, day: 8, hours: 23),
+            (zone: "America/New_York", month: 11, day: 1, hours: 25)
+        ]
+        for day in days {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: day.zone)!
+            let noon = calendar.date(from: DateComponents(year: 2026, month: day.month, day: day.day, hour: 12))!
+            let range = calendar.dateInterval(of: .day, for: noon)!
+            try expect(range.duration == Double(day.hours * 3_600), "A local day must account for daylight saving time")
+
+            let url = directory.appendingPathComponent("day-\(day.month)-\(day.day)-\(day.hours).sqlite")
+            let store = try TodoStore(databaseURL: url)
+            let start = range.start.timeIntervalSince1970
+            let end = range.end.timeIntervalSince1970
+            let fixtures: [(title: String, created: Double, completed: Double?, visible: Bool)] = [
+                ("이전 미완료", start - 100_000, nil, true),
+                ("미래 미완료", end + 100_000, nil, true),
+                ("어제 완료", start - 100_000, start - 1, false),
+                ("시작 시각 완료", start - 100_000, start, true),
+                ("마지막 순간 완료", start - 100_000, end - 1, true),
+                ("시작 시각 작성", start, end + 1, true),
+                ("마지막 순간 작성", end - 1, end + 1, true),
+                ("다음날 작성과 완료", end, end, false),
+                ("다음날 완료", start - 100_000, end, false)
+            ]
+            var expectedIDs = Set<UUID>()
+            for fixture in fixtures {
+                let task = try store.addTask(title: fixture.title, showAsStickyNote: true)
+                let completion = fixture.completed.map { String($0) } ?? "NULL"
+                try executeLegacySQL("""
+                    UPDATE todos SET created_at = \(fixture.created), completed_at = \(completion)
+                    WHERE id = '\(task.id.uuidString)'
+                    """, at: url)
+                if fixture.visible { expectedIDs.insert(task.id) }
+            }
+
+            let snapshot = try store.fetchSnapshot(dayRange: range)
+            try expect(Set(snapshot.tasks.map(\.id)) == expectedIDs, "Today includes all incomplete tasks and completed tasks created or completed in the half-open local day")
+            try expect(Set(snapshot.stickyNotes.map(\.id)) == expectedIDs, "Snapshot note state must use the same day filter as its tasks")
+            try expect(snapshot.tasks.prefix(2).allSatisfy { !$0.isCompleted }, "Filtering must preserve incomplete-first ordering")
+            var pagedTasks: [TodoItem] = []
+            for index in 0..<3 {
+                let page = try store.fetchPage(index: index, pageSize: 2, dayRange: range)
+                try expect(page.totalCount == expectedIDs.count && page.pageCount == 3, "Widget count and page bounds must use the filtered rows")
+                pagedTasks.append(contentsOf: page.tasks)
+            }
+            try expect(pagedTasks == snapshot.tasks, "Filtered pagination must match snapshot ordering without gaps or duplicates")
+            try expect(try store.fetchPage(index: 99, pageSize: 2, dayRange: range).index == 2, "Page clamping must use the filtered count")
+            try expect(try store.fetchTasks().count == fixtures.count, "Today filtering must retain every stored task")
+            try expect(try store.fetchSnapshot().tasks.count == fixtures.count, "Unfiltered snapshot callers must retain their previous behavior")
+        }
     }
 
     private static func testAddTaskWithStickyNote(in directory: URL) throws {

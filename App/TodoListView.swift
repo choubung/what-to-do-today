@@ -72,6 +72,7 @@ struct TodoListView: View {
                     taskSection("완료", tasks: model.completedTasks)
                 }
                 .listStyle(.inset)
+                .transaction { $0.animation = nil }
             }
         }
         .frame(minWidth: 360, minHeight: 360)
@@ -115,13 +116,13 @@ struct TodoListView: View {
                 ForEach(tasks) { task in
                     HStack(alignment: .top, spacing: 12) {
                         Toggle(isOn: Binding(
-                            get: { task.isCompleted },
+                            get: { model.completionValue(for: task) },
                             set: { value in Task { await model.setCompleted(task, completed: value) } }
                         )) { Text(task.title) }
                         .toggleStyle(.checkbox)
                         .labelsHidden()
                         .accessibilityLabel(task.title)
-                        .disabled(model.isSaving)
+                        .disabled(model.isSaving || model.isCompleting(task.id))
                         .padding(.top, 2)
 
                         Text(task.title)
@@ -141,16 +142,16 @@ struct TodoListView: View {
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
                         .fixedSize()
-                        .disabled(model.isSaving)
+                        .disabled(model.isSaving || model.isCompleting(task.id))
                         .accessibilityLabel("\(task.title) 옵션")
                     }
                     .padding(.vertical, 7)
                     .contextMenu {
                         stickyActions(for: task)
                         Button("수정", systemImage: "pencil") { editingTask = task }
-                            .disabled(model.isSaving)
+                            .disabled(model.isSaving || model.isCompleting(task.id))
                         Button("삭제", systemImage: "trash", role: .destructive) { deletingTask = task }
-                            .disabled(model.isSaving)
+                            .disabled(model.isSaving || model.isCompleting(task.id))
                     }
                 }
             } header: {

@@ -5,6 +5,8 @@ import WidgetKit
 private actor TodoRepository {
     private var store: TodoStore?
 
+    init(store: TodoStore? = nil) { self.store = store }
+
     private func connection() throws -> TodoStore {
         if let store { return store }
         let opened = try TodoStore.live()
@@ -13,7 +15,7 @@ private actor TodoRepository {
     }
 
     func fetchSnapshot() throws -> TodoSnapshot {
-        try connection().fetchSnapshot()
+        try connection().fetchSnapshot(dayRange: Calendar.autoupdatingCurrent.dateInterval(of: .day, for: Date()))
     }
 
     func add(title: String, showAsStickyNote: Bool) throws {
@@ -58,11 +60,15 @@ final class TodoListModel: ObservableObject {
     @Published private(set) var snapshot = TodoSnapshot(tasks: [], stickyNotes: [])
     @Published private(set) var isLoading = true
     @Published private(set) var isSaving = false
+    @Published private var pendingCompletions: [UUID: Bool] = [:]
     @Published var errorMessage: String?
 
-    private let repository = TodoRepository()
+    private let repository: TodoRepository
+    private let notificationSource = UUID().uuidString
+    private let broadcastsChanges: Bool
     private var observer: NSObjectProtocol?
-    private var refreshGeneration = 0
+    private var refreshTask: Task<Void, Never>?
+    private var refreshRequested = false
     private var saveWaiters: [CheckedContinuation<Void, Never>] = []
     private static let positionErrorMessage = "포스트잇 위치를 저장하지 못했어요. 다시 이동해 주세요."
 
@@ -78,30 +84,51 @@ final class TodoListModel: ObservableObject {
         stickyNotes.contains { $0.id == id && $0.isVisible }
     }
 
-    init() {
+    func isCompleting(_ id: UUID) -> Bool { pendingCompletions[id] != nil }
+
+    func completionValue(for task: TodoItem) -> Bool {
+        pendingCompletions[task.id] ?? task.isCompleted
+    }
+
+    init(store: TodoStore? = nil, broadcastsChanges: Bool = true) {
+        repository = TodoRepository(store: store)
+        self.broadcastsChanges = broadcastsChanges
+        let ownSource = notificationSource
         observer = DistributedNotificationCenter.default().addObserver(
             forName: TodoStore.notificationName,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
+            guard notification.object as? String != ownSource else { return }
             Task { @MainActor in await self?.refresh() }
         }
         Task { await refresh() }
     }
 
     func refresh() async {
-        refreshGeneration += 1
-        let generation = refreshGeneration
-        do {
-            let currentSnapshot = try await repository.fetchSnapshot()
-            guard generation == refreshGeneration else { return }
-            snapshot = currentSnapshot
-            isLoading = false
-        } catch {
-            guard generation == refreshGeneration else { return }
-            present(error)
-            isLoading = false
+        refreshRequested = true
+        if let refreshTask {
+            await refreshTask.value
+            return
         }
+        let task = Task {
+            repeat {
+                refreshRequested = false
+                do {
+                    let currentSnapshot = try await repository.fetchSnapshot()
+                    // A newer request may follow a write that this read did not yet see.
+                    guard !refreshRequested else { continue }
+                    if snapshot != currentSnapshot { snapshot = currentSnapshot }
+                } catch {
+                    guard !refreshRequested else { continue }
+                    present(error)
+                }
+                if isLoading { isLoading = false }
+            } while refreshRequested
+            refreshTask = nil
+        }
+        refreshTask = task
+        await task.value
     }
 
     func add(title: String, showAsStickyNote: Bool = false) async -> Bool {
@@ -115,7 +142,20 @@ final class TodoListModel: ObservableObject {
     }
 
     func setCompleted(_ task: TodoItem, completed: Bool) async {
-        _ = await save { try await self.repository.setCompleted(id: task.id, completed: completed) }
+        guard !isSaving, !isCompleting(task.id) else { return }
+        pendingCompletions[task.id] = completed
+        if errorMessage != nil { errorMessage = nil }
+        defer {
+            pendingCompletions.removeValue(forKey: task.id)
+            resumeSaveWaitersIfIdle()
+        }
+        do {
+            try await repository.setCompleted(id: task.id, completed: completed)
+            notifyChange(reloadWidgets: true)
+        } catch {
+            present(error)
+        }
+        await refresh()
     }
 
     func delete(_ task: TodoItem) async -> Bool {
@@ -159,7 +199,7 @@ final class TodoListModel: ObservableObject {
     }
 
     func waitForPendingSave() async {
-        guard isSaving else { return }
+        guard isSaving || !pendingCompletions.isEmpty else { return }
         await withCheckedContinuation { continuation in
             saveWaiters.append(continuation)
         }
@@ -173,20 +213,12 @@ final class TodoListModel: ObservableObject {
         isSaving = true
         errorMessage = nil
         defer {
-            let waiters = saveWaiters
-            saveWaiters.removeAll()
             isSaving = false
-            for waiter in waiters { waiter.resume() }
+            resumeSaveWaitersIfIdle()
         }
         do {
             try await operation()
-            DistributedNotificationCenter.default().postNotificationName(
-                TodoStore.notificationName,
-                object: nil,
-                userInfo: nil,
-                deliverImmediately: true
-            )
-            if reloadWidgets { WidgetCenter.shared.reloadAllTimelines() }
+            notifyChange(reloadWidgets: reloadWidgets)
             await refresh()
             return true
         } catch {
@@ -194,6 +226,24 @@ final class TodoListModel: ObservableObject {
             await refresh()
             return false
         }
+    }
+
+    private func notifyChange(reloadWidgets: Bool) {
+        guard broadcastsChanges else { return }
+        DistributedNotificationCenter.default().postNotificationName(
+            TodoStore.notificationName,
+            object: notificationSource,
+            userInfo: nil,
+            deliverImmediately: true
+        )
+        if reloadWidgets { WidgetCenter.shared.reloadAllTimelines() }
+    }
+
+    private func resumeSaveWaitersIfIdle() {
+        guard !isSaving, pendingCompletions.isEmpty else { return }
+        let waiters = saveWaiters
+        saveWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
     private func present(_ error: Error) {

@@ -34,27 +34,48 @@ struct TodoWidgetProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (TodoWidgetEntry) -> Void) {
-        completion(context.isPreview ? .placeholder(for: context.family) : entry(for: context.family))
+        completion(context.isPreview ? .placeholder(for: context.family) : entry(for: context.family, at: Date()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<TodoWidgetEntry>) -> Void) {
-        let entry = entry(for: context.family)
-        let policy: TimelineReloadPolicy = entry.errorMessage == nil
-            ? .never : .after(Date().addingTimeInterval(60))
-        completion(Timeline(entries: [entry], policy: policy))
+        let now = Date()
+        let current = entry(for: context.family, at: now)
+        guard current.errorMessage == nil,
+              let dayRange = Calendar.autoupdatingCurrent.dateInterval(of: .day, for: now) else {
+            completion(Timeline(entries: [current], policy: .after(now.addingTimeInterval(60))))
+            return
+        }
+
+        // Precompute the next local day so a delayed reload does not retain yesterday's completed tasks.
+        // WidgetKit still controls when entries are rendered and new timelines are requested.
+        let nextDay = entry(
+            for: context.family, at: dayRange.end, requestedPage: current.page, persistPage: false
+        )
+        guard nextDay.errorMessage == nil else {
+            completion(Timeline(entries: [current], policy: .after(now.addingTimeInterval(60))))
+            return
+        }
+        completion(Timeline(entries: [current, nextDay], policy: .atEnd))
     }
 
-    private func entry(for family: WidgetFamily) -> TodoWidgetEntry {
+    private func entry(
+        for family: WidgetFamily, at date: Date, requestedPage: Int? = nil, persistPage: Bool = true
+    ) -> TodoWidgetEntry {
         let familyKey = TodoWidgetState.familyKey(for: family)
+        guard let dayRange = Calendar.autoupdatingCurrent.dateInterval(of: .day, for: date) else {
+            return unavailableEntry(for: familyKey, at: date)
+        }
         do {
-            let requestedPage = TodoWidgetState.page(for: familyKey)
+            let requestedPage = requestedPage ?? TodoWidgetState.page(for: familyKey)
             let page = try TodoStore.live().fetchPage(
                 index: requestedPage,
-                pageSize: TodoWidgetState.pageSize(for: family)
+                pageSize: TodoWidgetState.pageSize(for: family),
+                dayRange: dayRange
             )
-            TodoWidgetState.clampPage(page.index, ifStill: requestedPage, for: familyKey)
+            // A future entry may have fewer pages. Do not change today's selected page in advance.
+            if persistPage { TodoWidgetState.clampPage(page.index, ifStill: requestedPage, for: familyKey) }
             return TodoWidgetEntry(
-                date: Date(),
+                date: date,
                 tasks: page.tasks,
                 totalCount: page.totalCount,
                 page: page.index,
@@ -64,12 +85,16 @@ struct TodoWidgetProvider: TimelineProvider {
                     ? "저장하지 못했어요. 다시 시도해 주세요." : nil
             )
         } catch {
-            return TodoWidgetEntry(
-                date: Date(), tasks: [], totalCount: 0,
-                page: 0, pageCount: 1, familyKey: familyKey,
-                errorMessage: "목록을 불러오지 못했어요."
-            )
+            return unavailableEntry(for: familyKey, at: date)
         }
+    }
+
+    private func unavailableEntry(for familyKey: String, at date: Date) -> TodoWidgetEntry {
+        TodoWidgetEntry(
+            date: date, tasks: [], totalCount: 0,
+            page: 0, pageCount: 1, familyKey: familyKey,
+            errorMessage: "목록을 불러오지 못했어요."
+        )
     }
 }
 
@@ -80,18 +105,20 @@ struct TodoWidgetView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Link(destination: URL(string: "whattodotoday://open")!) {
-                    Text("할 일")
+                    Text("To Do")
                         .font(.headline)
                 }
                 Spacer()
                 if entry.errorMessage != nil && !entry.tasks.isEmpty {
                     Text("저장 실패 · 다시 시도")
                         .font(.caption2)
+                        .contentTransition(.identity)
                         .foregroundStyle(.red)
                         .accessibilityLabel(entry.errorMessage ?? "저장 실패")
                 } else if entry.totalCount > 0 {
                     Text("총 \(entry.totalCount)개")
                         .font(.caption)
+                        .contentTransition(.identity)
                         .foregroundStyle(.secondary)
                 }
                 Link(destination: URL(string: "whattodotoday://add")!) {
@@ -105,6 +132,7 @@ struct TodoWidgetView: View {
             if entry.tasks.isEmpty {
                 emptyContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.identity)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(entry.tasks) { task in
@@ -118,16 +146,19 @@ struct TodoWidgetView: View {
                         ) {
                             Text(task.title)
                                 .font(.subheadline)
+                                .contentTransition(.identity)
                                 .foregroundStyle(task.isCompleted ? .secondary : .primary)
                                 .strikethrough(task.isCompleted)
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .toggleStyle(.checkbox)
+                        .transition(.identity)
                         .accessibilityLabel(task.title)
                         .accessibilityValue(task.isCompleted ? "완료" : "미완료")
                     }
                 }
+                .transition(.identity)
                 Spacer(minLength: 0)
             }
 
@@ -139,6 +170,7 @@ struct TodoWidgetView: View {
                 Spacer()
                 Text("\(entry.page + 1) / \(entry.pageCount)")
                     .monospacedDigit()
+                    .contentTransition(.identity)
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("\(entry.pageCount)페이지 중 \(entry.page + 1)페이지")
                 Spacer()
@@ -153,6 +185,7 @@ struct TodoWidgetView: View {
             .font(.caption)
             .buttonStyle(.plain)
         }
+        .animation(nil, value: entry.tasks)
         .widgetURL(URL(string: "whattodotoday://open"))
         .containerBackground(.background, for: .widget)
     }
@@ -164,6 +197,7 @@ struct TodoWidgetView: View {
                 .foregroundStyle(.secondary)
             Text(entry.errorMessage ?? "새로운 할 일을 추가해 보세요.")
                 .font(.caption)
+                .contentTransition(.identity)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             if entry.errorMessage != nil {

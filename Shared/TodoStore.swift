@@ -38,11 +38,19 @@ final class TodoStore: @unchecked Sendable {
     private var database: OpaquePointer?
     private let lock = NSLock()
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-    private let orderedColumns = """
+    private let dayFilter = """
+        WHERE ?1 IS NULL OR completed_at IS NULL
+            OR (created_at >= ?1 AND created_at < ?2)
+            OR (completed_at >= ?1 AND completed_at < ?2)
+        """
+    private var orderedColumns: String {
+        """
         SELECT id, title, created_at, completed_at FROM todos
+        \(dayFilter)
         ORDER BY completed_at IS NOT NULL ASC,
                  COALESCE(completed_at, created_at) DESC, id ASC
         """
+    }
 
     init(databaseURL: URL) throws {
         try FileManager.default.createDirectory(
@@ -89,26 +97,30 @@ final class TodoStore: @unchecked Sendable {
         return try readTasks(sql: orderedColumns)
     }
 
-    func fetchSnapshot() throws -> TodoSnapshot {
+    func fetchSnapshot(dayRange: DateInterval? = nil) throws -> TodoSnapshot {
         lock.lock()
         defer { lock.unlock() }
         return try withTransaction(readOnly: true) {
-            TodoSnapshot(tasks: try readTasks(sql: orderedColumns), stickyNotes: try readStickyNotes())
+            TodoSnapshot(
+                tasks: try readTasks(sql: orderedColumns, dayRange: dayRange),
+                stickyNotes: try readStickyNotes(dayRange: dayRange)
+            )
         }
     }
 
     /// Counting and fetching share a snapshot, including during concurrent widget updates.
-    func fetchPage(index: Int, pageSize: Int) throws -> TodoPage {
+    func fetchPage(index: Int, pageSize: Int, dayRange: DateInterval? = nil) throws -> TodoPage {
         guard pageSize > 0 else { throw TodoStoreError.invalidPageSize }
         lock.lock()
         defer { lock.unlock() }
 
         return try withTransaction(readOnly: true) {
-            let count = try taskCount()
+            let count = try taskCount(dayRange: dayRange)
             let lastIndex = max(0, (count - 1) / pageSize)
             let clampedIndex = min(max(0, index), lastIndex)
             let tasks = try readTasks(
-                sql: orderedColumns + " LIMIT ? OFFSET ?",
+                sql: orderedColumns + " LIMIT ?3 OFFSET ?4",
+                dayRange: dayRange,
                 pageSize: pageSize,
                 offset: clampedIndex * pageSize
             )
@@ -275,12 +287,15 @@ final class TodoStore: @unchecked Sendable {
         }
     }
 
-    private func readStickyNotes() throws -> [StickyNoteState] {
+    private func readStickyNotes(dayRange: DateInterval?) throws -> [StickyNoteState] {
         let statement = try prepare("""
             SELECT todo_id, is_visible, is_always_on_top, position_x, position_y, display_id
-            FROM sticky_notes ORDER BY todo_id
+            FROM sticky_notes JOIN todos ON todos.id = sticky_notes.todo_id
+            \(dayFilter)
+            ORDER BY todo_id
             """)
         defer { sqlite3_finalize(statement) }
+        try bindDayRange(dayRange, to: statement)
         var notes: [StickyNoteState] = []
         var result = sqlite3_step(statement)
         while result == SQLITE_ROW {
@@ -344,19 +359,21 @@ final class TodoStore: @unchecked Sendable {
         return title
     }
 
-    private func taskCount() throws -> Int {
-        let statement = try prepare("SELECT COUNT(*) FROM todos")
+    private func taskCount(dayRange: DateInterval?) throws -> Int {
+        let statement = try prepare("SELECT COUNT(*) FROM todos \(dayFilter)")
         defer { sqlite3_finalize(statement) }
+        try bindDayRange(dayRange, to: statement)
         guard sqlite3_step(statement) == SQLITE_ROW else { throw databaseError() }
         return Int(sqlite3_column_int64(statement, 0))
     }
 
-    private func readTasks(sql: String, pageSize: Int? = nil, offset: Int = 0) throws -> [TodoItem] {
+    private func readTasks(sql: String, dayRange: DateInterval? = nil, pageSize: Int? = nil, offset: Int = 0) throws -> [TodoItem] {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
+        try bindDayRange(dayRange, to: statement)
         if let pageSize {
-            try check(sqlite3_bind_int64(statement, 1, Int64(pageSize)))
-            try check(sqlite3_bind_int64(statement, 2, Int64(offset)))
+            try check(sqlite3_bind_int64(statement, 3, Int64(pageSize)))
+            try check(sqlite3_bind_int64(statement, 4, Int64(offset)))
         }
 
         var tasks: [TodoItem] = []
@@ -397,6 +414,16 @@ final class TodoStore: @unchecked Sendable {
             sqlite3_bind_text64(statement, index, bytes, UInt64(value.utf8.count), transient, UInt8(SQLITE_UTF8))
         }
         try check(result)
+    }
+
+    private func bindDayRange(_ dayRange: DateInterval?, to statement: OpaquePointer) throws {
+        if let dayRange {
+            try check(sqlite3_bind_double(statement, 1, dayRange.start.timeIntervalSince1970))
+            try check(sqlite3_bind_double(statement, 2, dayRange.end.timeIntervalSince1970))
+        } else {
+            try check(sqlite3_bind_null(statement, 1))
+            try check(sqlite3_bind_null(statement, 2))
+        }
     }
 
     private func finishWrite(_ statement: OpaquePointer, requiresExistingTask: Bool = false) throws {
