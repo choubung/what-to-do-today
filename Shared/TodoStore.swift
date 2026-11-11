@@ -191,23 +191,46 @@ final class TodoStore: @unchecked Sendable {
 
         return try withTransaction(readOnly: false) {
             let categoryID = try resolvedCategoryID(categoryID)
-            let task = TodoItem(id: UUID(), title: title, createdAt: Date(), completedAt: nil, categoryID: categoryID)
-            let statement = try prepare("INSERT INTO todos (id, title, created_at, category_id) VALUES (?, ?, ?, ?)")
-            defer { sqlite3_finalize(statement) }
-            try bind(task.id.uuidString, to: statement, at: 1)
-            try bind(task.title, to: statement, at: 2)
-            try check(sqlite3_bind_double(statement, 3, task.createdAt.timeIntervalSince1970))
-            try bindCategoryID(categoryID, to: statement, at: 4)
-            try finishWrite(statement)
-
-            if showAsStickyNote {
-                let note = try prepare("INSERT INTO sticky_notes (todo_id, is_visible) VALUES (?, 1)")
-                defer { sqlite3_finalize(note) }
-                try bind(task.id.uuidString, to: note, at: 1)
-                try finishWrite(note)
-            }
-            return task
+            return try insertTask(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote)
         }
+    }
+
+    /// Resolves the category inside the same transaction as the insert.
+    func addTask(title: String, categoryName: String?) throws -> (task: TodoItem, category: TodoCategory) {
+        let title = try validatedTitle(title)
+        let nameKey = try categoryName.map { categoryNameKey(try validatedCategoryName($0)) }
+        lock.lock()
+        defer { lock.unlock() }
+
+        return try withTransaction(readOnly: false) {
+            let categories = try readCategories()
+            let category = categories.first {
+                if let nameKey { return categoryNameKey($0.name) == nameKey }
+                return $0.isDefault
+            }
+            guard let category else { throw TodoStoreError.missingCategory }
+            let task = try insertTask(title: title, categoryID: category.id, showAsStickyNote: false)
+            return (task, category)
+        }
+    }
+
+    private func insertTask(title: String, categoryID: UUID, showAsStickyNote: Bool) throws -> TodoItem {
+        let task = TodoItem(id: UUID(), title: title, createdAt: Date(), completedAt: nil, categoryID: categoryID)
+        let statement = try prepare("INSERT INTO todos (id, title, created_at, category_id) VALUES (?, ?, ?, ?)")
+        defer { sqlite3_finalize(statement) }
+        try bind(task.id.uuidString, to: statement, at: 1)
+        try bind(task.title, to: statement, at: 2)
+        try check(sqlite3_bind_double(statement, 3, task.createdAt.timeIntervalSince1970))
+        try bindCategoryID(categoryID, to: statement, at: 4)
+        try finishWrite(statement)
+
+        if showAsStickyNote {
+            let note = try prepare("INSERT INTO sticky_notes (todo_id, is_visible) VALUES (?, 1)")
+            defer { sqlite3_finalize(note) }
+            try bind(task.id.uuidString, to: note, at: 1)
+            try finishWrite(note)
+        }
+        return task
     }
 
     func updateTask(id: UUID, title: String) throws {

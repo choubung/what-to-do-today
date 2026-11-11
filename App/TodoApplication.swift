@@ -6,11 +6,34 @@ import WidgetKit
 @MainActor
 enum TodoApplication {
     static func main() {
+        if CommandLine.arguments.dropFirst().first == "--mcp" {
+            runMCPServer()
+            return
+        }
         let application = NSApplication.shared
         let delegate = TodoApplicationDelegate()
         application.delegate = delegate
         application.setActivationPolicy(.regular)
         withExtendedLifetime(delegate) { application.run() }
+    }
+
+    private static func runMCPServer() {
+        var server = TodoMCPServer(
+            version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0",
+            openStore: TodoStore.live,
+            didChangeStore: {
+                DistributedNotificationCenter.default().postNotificationName(
+                    TodoStore.notificationName, object: nil, userInfo: nil, deliverImmediately: true
+                )
+                WidgetCenter.shared.reloadAllTimelines()
+            }
+        )
+        do {
+            try server.run()
+        } catch {
+            FileHandle.standardError.write(Data("MCP 연결을 종료합니다.\n".utf8))
+            exit(EXIT_FAILURE)
+        }
     }
 }
 
