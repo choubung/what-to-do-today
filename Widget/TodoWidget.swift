@@ -11,6 +11,7 @@ struct TodoWidgetEntry: TimelineEntry {
     let pageCount: Int
     let familyKey: String
     let errorMessage: String?
+    var categoryNames: [UUID: String] = [:]
 
     static func placeholder(for family: WidgetFamily) -> Self {
         let now = Date()
@@ -69,7 +70,8 @@ struct TodoWidgetProvider: TimelineProvider {
         }
         do {
             let requestedPage = requestedPage ?? TodoWidgetState.page(for: familyKey)
-            let page = try TodoStore.live().fetchPage(
+            let store = try TodoStore.live()
+            let page = try store.fetchPage(
                 index: requestedPage,
                 pageSize: TodoWidgetState.pageSize(for: family),
                 dayRange: dayRange
@@ -84,7 +86,8 @@ struct TodoWidgetProvider: TimelineProvider {
                 pageCount: page.pageCount,
                 familyKey: familyKey,
                 errorMessage: TodoWidgetState.actionFailed(for: familyKey)
-                    ? "저장하지 못했어요. 다시 시도해 주세요." : nil
+                    ? "저장하지 못했어요. 다시 시도해 주세요." : nil,
+                categoryNames: Dictionary(uniqueKeysWithValues: try store.fetchCategories().map { ($0.id, $0.name) })
             )
         } catch {
             return unavailableEntry(for: familyKey, at: date)
@@ -146,18 +149,24 @@ struct TodoWidgetView: View {
                                 familyKey: entry.familyKey
                             )
                         ) {
-                            Text(task.title)
+                            HStack(spacing: 6) {
+                                Text(task.title)
                                 .font(.subheadline)
                                 .contentTransition(.identity)
                                 .foregroundStyle(task.isCompleted ? .secondary : .primary)
                                 .strikethrough(task.isCompleted)
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                if let id = task.categoryID, let name = entry.categoryNames[id] {
+                                    Text(name).font(.caption2).foregroundStyle(.secondary)
+                                        .lineLimit(1).frame(maxWidth: 70, alignment: .trailing)
+                                }
+                            }
                         }
                         .toggleStyle(.checkbox)
                         .transition(.identity)
                         .accessibilityLabel(task.title)
-                        .accessibilityValue(task.isCompleted ? "완료" : "미완료")
+                        .accessibilityValue((task.isCompleted ? "완료" : "미완료") + (task.categoryID.flatMap { entry.categoryNames[$0] }.map { ", \($0)" } ?? ""))
                     }
                 }
                 .transition(.identity)
