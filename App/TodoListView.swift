@@ -6,6 +6,7 @@ private enum TodoCategoryFilter: Hashable {
 
 struct TodoListView: View {
     @ObservedObject var model: TodoListModel
+    @ObservedObject var reminders: ReminderCoordinator
     @State private var newTitle = ""
     @State private var showNewTaskAsStickyNote = false
     @State private var editingTask: TodoItem?
@@ -15,6 +16,8 @@ struct TodoListView: View {
     @State private var newCategoryID: UUID?
     @State private var categoryFilter = TodoCategoryFilter.all
     @State private var showingCategories = false
+    @State private var showingReminderSettings = false
+    @State private var reminderTask: TodoItem?
     @FocusState private var isEntryFocused: Bool
     @Environment(\.controlActiveState) private var controlActiveState
 
@@ -60,6 +63,11 @@ struct TodoListView: View {
                 Spacer()
                 categoryMenu
                 stickyManagementMenu
+                Button { showingReminderSettings = true } label: {
+                    Image(systemName: "bell")
+                }
+                .buttonStyle(.plain)
+                .help("알림 설정").accessibilityLabel("알림 설정")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -98,6 +106,12 @@ struct TodoListView: View {
         .sheet(isPresented: $showingCategories) {
             TodoCategoryManager(model: model)
         }
+        .sheet(isPresented: $showingReminderSettings) {
+            ReminderSettingsView(coordinator: reminders)
+        }
+        .sheet(item: $reminderTask) { task in
+            TodoReminderEditor(model: model, coordinator: reminders, taskID: task.id)
+        }
         .confirmationDialog("할 일을 삭제할까요?", isPresented: Binding(
             get: { deletingTask != nil },
             set: { if !$0 { deletingTask = nil } }
@@ -111,7 +125,7 @@ struct TodoListView: View {
             Text(task.title)
         }
         .alert("처리하지 못했어요", isPresented: Binding(
-            get: { model.errorMessage != nil && editingTask == nil && !showingStickyPicker && !showingCategories && controlActiveState == .key },
+            get: { model.errorMessage != nil && editingTask == nil && reminderTask == nil && !showingReminderSettings && !showingStickyPicker && !showingCategories && controlActiveState == .key },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
             Button("다시 불러오기") {
@@ -242,7 +256,8 @@ struct TodoListView: View {
                         model: model,
                         taskID: task.id,
                         edit: { editingTask = $0 },
-                        delete: { deletingTask = $0 }
+                        delete: { deletingTask = $0 },
+                        editReminder: { reminderTask = $0 }
                     )
                 }
             } header: {
@@ -281,6 +296,7 @@ private struct TodoTaskRow: View {
     let taskID: UUID
     let edit: (TodoItem) -> Void
     let delete: (TodoItem) -> Void
+    let editReminder: (TodoItem) -> Void
 
     var body: some View {
         if let task = model.tasks.first(where: { $0.id == taskID }) {
@@ -312,6 +328,13 @@ private struct TodoTaskRow: View {
                     Text(category).font(.caption).foregroundStyle(.secondary)
                         .lineLimit(1).accessibilityLabel("카테고리 \(category)")
                 }
+                if let reminder = model.reminder(for: task.id), let date = reminder.schedule.date() {
+                    Label {
+                        Text(date, format: .dateTime.month().day().hour().minute())
+                        if reminder.deliveredAt != nil { Text("알림 전달됨") }
+                    } icon: { Image(systemName: reminder.deliveredAt == nil ? "bell" : "bell.badge") }
+                    .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             Menu {
@@ -334,6 +357,10 @@ private struct TodoTaskRow: View {
     @ViewBuilder
     private func taskActions(_ task: TodoItem) -> some View {
         let isBusy = model.isSaving || model.isCompleting(task.id)
+        if !model.completionValue(for: task) {
+            Button("알림…", systemImage: "bell") { editReminder(task) }.disabled(isBusy)
+            Divider()
+        }
         if !model.completionValue(for: task) {
             Button(model.isStickyVisible(for: task.id) ? "포스트잇 앞으로 가져오기" : "포스트잇 띄우기", systemImage: "note") {
                 Task { _ = await model.showStickyNotes([task.id]) }

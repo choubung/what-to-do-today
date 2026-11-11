@@ -21,6 +21,12 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     private var quickAddWindow: NSPanel?
     private var openedFromURL = false
     private lazy var stickyNotes = StickyNoteCoordinator(model: model)
+    private lazy var reminders = ReminderCoordinator(
+        loadReminders: { [model] in try await model.loadPendingReminders() },
+        markDelivered: { [model] generations, date in
+            try await model.markRemindersDelivered(generations: generations, at: date)
+        }
+    )
     private var isPreparingToTerminate = false
     private var dayBoundaryTimer: Timer?
     private var trackedDayRange: DateInterval?
@@ -28,13 +34,21 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenu()
         _ = stickyNotes
+        reminders.onOpenList = { [weak self] in self?.showMainWindow() }
+        reminders.start()
         configureDateTracking()
         WidgetCenter.shared.reloadTimelines(ofKind: "WhatToDoTodayWidget")
-        // URL launch events arrive during startup. Defer the default window until they are handled.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, !self.openedFromURL else { return }
-            self.showMainWindow()
-        }
+        // Normal open/reopen events show the list; a login launch only restores background services.
+    }
+
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        !openedFromURL && !ReminderLaunchPolicy.isLoginEvent(NSAppleEventManager.shared().currentAppleEvent)
+    }
+
+    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        guard !ReminderLaunchPolicy.isLoginEvent(NSAppleEventManager.shared().currentAppleEvent) else { return false }
+        showMainWindow()
+        return true
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -66,6 +80,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationWillTerminate(_ notification: Notification) {
+        reminders.stop()
         dayBoundaryTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
         NSWorkspace.shared.notificationCenter.removeObserver(self)
@@ -75,6 +90,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         guard !isPreparingToTerminate else { return .terminateLater }
         isPreparingToTerminate = true
         Task {
+            await reminders.finishAndStop()
             await model.waitForPendingSave()
             await stickyNotes.flushPositions()
             sender.reply(toApplicationShouldTerminate: true)
@@ -140,7 +156,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
                 defer: false
             )
             window.title = "What to Do Today"
-            window.contentView = NSHostingView(rootView: TodoListView(model: model))
+            window.contentView = NSHostingView(rootView: TodoListView(model: model, reminders: reminders))
             window.minSize = NSSize(width: 360, height: 380)
             window.isReleasedWhenClosed = false
             window.setFrameAutosaveName("TodoMainWindow")
@@ -181,6 +197,8 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "What to Do Today 정보", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "What to Do Today 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         menu.addItem(appItem)

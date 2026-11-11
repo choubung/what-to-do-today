@@ -46,6 +46,22 @@ private actor TodoRepository {
         try connection().deleteCategory(id: id)
     }
 
+    func setReminder(id: UUID, localTime: ReminderLocalTime) throws {
+        try connection().setReminder(id: id, localTime: localTime)
+    }
+
+    func removeReminder(id: UUID) throws {
+        try connection().removeReminder(id: id)
+    }
+
+    func loadPendingReminders() throws -> [TodoReminderCandidate] {
+        try connection().fetchPendingReminders()
+    }
+
+    func markRemindersDelivered(generations: [UUID], at date: Date) throws {
+        try connection().markRemindersDelivered(generations: generations, at: date)
+    }
+
     func setCompleted(id: UUID, completed: Bool) throws {
         try connection().setCompleted(id: id, completed: completed)
     }
@@ -106,6 +122,7 @@ final class TodoListModel: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var refreshRequested = false
     private var pendingPreferenceSaves = 0
+    private var pendingReminderSaves = 0
     private var saveWaiters: [CheckedContinuation<Void, Never>] = []
     private static let positionErrorMessage = "포스트잇 위치를 저장하지 못했어요. 다시 이동해 주세요."
     private static let sizeErrorMessage = "포스트잇 크기를 저장하지 못했어요. 다시 조정해 주세요."
@@ -211,6 +228,33 @@ final class TodoListModel: ObservableObject {
         await save { try await self.repository.deleteCategory(id: id) }
     }
 
+    func reminder(for id: UUID) -> TodoReminder? {
+        snapshot.reminders.first { $0.id == id }
+    }
+
+    func setReminder(id: UUID, localTime: ReminderLocalTime) async -> Bool {
+        await save { try await self.repository.setReminder(id: id, localTime: localTime) }
+    }
+
+    func removeReminder(id: UUID) async -> Bool {
+        await save { try await self.repository.removeReminder(id: id) }
+    }
+
+    func loadPendingReminders() async throws -> [TodoReminderCandidate] {
+        try await repository.loadPendingReminders()
+    }
+
+    func markRemindersDelivered(generations: [UUID], at date: Date) async throws {
+        pendingReminderSaves += 1
+        defer {
+            pendingReminderSaves -= 1
+            resumeSaveWaitersIfIdle()
+        }
+        try await repository.markRemindersDelivered(generations: generations, at: date)
+        notifyChange(reloadWidgets: false)
+        await refresh()
+    }
+
     @discardableResult
     func setCompleted(_ task: TodoItem, completed: Bool) async -> Bool {
         guard !isSaving, !isCompleting(task.id) else { return false }
@@ -273,7 +317,7 @@ final class TodoListModel: ObservableObject {
     }
 
     func waitForPendingSave() async {
-        guard isSaving || !pendingCompletions.isEmpty || pendingPreferenceSaves > 0 else { return }
+        guard isSaving || !pendingCompletions.isEmpty || pendingPreferenceSaves > 0 || pendingReminderSaves > 0 else { return }
         await withCheckedContinuation { continuation in
             saveWaiters.append(continuation)
         }
@@ -359,7 +403,7 @@ final class TodoListModel: ObservableObject {
     }
 
     private func resumeSaveWaitersIfIdle() {
-        guard !isSaving, pendingCompletions.isEmpty, pendingPreferenceSaves == 0 else { return }
+        guard !isSaving, pendingCompletions.isEmpty, pendingPreferenceSaves == 0, pendingReminderSaves == 0 else { return }
         let waiters = saveWaiters
         saveWaiters.removeAll()
         for waiter in waiters { waiter.resume() }
@@ -367,7 +411,7 @@ final class TodoListModel: ObservableObject {
 
     private func present(_ error: Error) {
         switch error as? TodoStoreError {
-        case .emptyTitle?, .missingTask?, .invalidCategoryName?, .duplicateCategoryName?, .missingCategory?:
+        case .invalidReminder?, .completedTaskReminder?, .emptyTitle?, .missingTask?, .invalidCategoryName?, .duplicateCategoryName?, .missingCategory?:
             errorMessage = error.localizedDescription
         case .unavailableAppGroup?:
             errorMessage = "할 일 저장 공간에 접근할 수 없어요."

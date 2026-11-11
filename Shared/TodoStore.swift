@@ -4,6 +4,8 @@ import SQLite3
 enum TodoStoreError: LocalizedError {
     case emptyTitle
     case missingTask
+    case invalidReminder
+    case completedTaskReminder
     case invalidCategoryName
     case duplicateCategoryName
     case missingCategory
@@ -28,6 +30,10 @@ enum TodoStoreError: LocalizedError {
             return "같은 이름의 카테고리가 이미 있어요."
         case .missingCategory:
             return "이 카테고리를 찾을 수 없어요. 다시 선택해 주세요."
+        case .invalidReminder:
+            return "알림 시간을 확인해 주세요."
+        case .completedTaskReminder:
+            return "완료한 할 일에는 알림을 설정할 수 없어요."
         case .unavailableAppGroup:
             return "공유 저장 공간에 접근할 수 없어요. 앱의 App Groups 서명을 확인해 주세요."
         case .invalidPageSize:
@@ -123,7 +129,8 @@ final class TodoStore: @unchecked Sendable {
                 tasks: try readTasks(sql: orderedColumns, dayRange: dayRange),
                 stickyNotes: try readStickyNotes(dayRange: dayRange),
                 stickyNoteDefaultFontSize: try readDefaultStickyFontSize(),
-                categories: try readCategories()
+                categories: try readCategories(),
+                reminders: try readReminders(dayRange: dayRange)
             )
         }
     }
@@ -405,6 +412,136 @@ final class TodoStore: @unchecked Sendable {
         try finishWrite(statement)
     }
 
+    @discardableResult
+    func setReminder(id: UUID, localTime: ReminderLocalTime) throws -> TodoReminder {
+        guard ReminderLocalTime(year: localTime.year, month: localTime.month, day: localTime.day,
+                                hour: localTime.hour, minute: localTime.minute) != nil else {
+            throw TodoStoreError.invalidReminder
+        }
+        let reminder = TodoReminder(id: id, schedule: localTime)
+        lock.lock()
+        defer { lock.unlock() }
+        return try withTransaction(readOnly: false) {
+            let task = try prepare("SELECT completed_at FROM todos WHERE id = ?")
+            defer { sqlite3_finalize(task) }
+            try bind(id.uuidString, to: task, at: 1)
+            let result = sqlite3_step(task)
+            if result == SQLITE_DONE { throw TodoStoreError.missingTask }
+            guard result == SQLITE_ROW else { throw databaseError() }
+            guard sqlite3_column_type(task, 0) == SQLITE_NULL else {
+                throw TodoStoreError.completedTaskReminder
+            }
+            let statement = try prepare("""
+                INSERT INTO todo_reminders (todo_id, generation_id, year, month, day, hour, minute, delivered_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(todo_id) DO UPDATE SET
+                    generation_id = excluded.generation_id, year = excluded.year, month = excluded.month,
+                    day = excluded.day, hour = excluded.hour, minute = excluded.minute, delivered_at = NULL
+                """)
+            defer { sqlite3_finalize(statement) }
+            try bind(id.uuidString, to: statement, at: 1)
+            try bind(reminder.generationID.uuidString, to: statement, at: 2)
+            for (offset, component) in [localTime.year, localTime.month, localTime.day, localTime.hour, localTime.minute].enumerated() {
+                try check(sqlite3_bind_int64(statement, Int32(offset + 3), Int64(component)))
+            }
+            try finishWrite(statement)
+            return reminder
+        }
+    }
+
+    func removeReminder(id: UUID) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        let statement = try prepare("DELETE FROM todo_reminders WHERE todo_id = ?")
+        defer { sqlite3_finalize(statement) }
+        try bind(id.uuidString, to: statement, at: 1)
+        try finishWrite(statement)
+    }
+
+    /// Pending reminders are independent of the app's visible day range.
+    func fetchPendingReminders() throws -> [TodoReminderCandidate] {
+        lock.lock()
+        defer { lock.unlock() }
+        let statement = try prepare("""
+            SELECT todo_id, generation_id, year, month, day, hour, minute, delivered_at, title, completed_at
+            FROM todo_reminders JOIN todos ON todos.id = todo_reminders.todo_id
+            WHERE completed_at IS NULL AND delivered_at IS NULL
+            ORDER BY year, month, day, hour, minute, todo_id
+            """)
+        defer { sqlite3_finalize(statement) }
+        var candidates: [TodoReminderCandidate] = []
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            let reminder = try readReminder(statement)
+            candidates.append(TodoReminderCandidate(
+                taskID: reminder.id,
+                title: stringColumn(statement, index: 8),
+                isCompleted: sqlite3_column_type(statement, 9) != SQLITE_NULL,
+                reminder: reminder
+            ))
+            result = sqlite3_step(statement)
+        }
+        guard result == SQLITE_DONE else { throw databaseError() }
+        return candidates
+    }
+
+    func markRemindersDelivered(generations: [UUID], at date: Date) throws {
+        guard date.timeIntervalSince1970.isFinite else { throw TodoStoreError.invalidReminder }
+        lock.lock()
+        defer { lock.unlock() }
+        try withTransaction(readOnly: false) {
+            let statement = try prepare("""
+                UPDATE todo_reminders SET delivered_at = COALESCE(delivered_at, ?)
+                WHERE generation_id = ?
+                """)
+            defer { sqlite3_finalize(statement) }
+            for generation in Set(generations) {
+                try check(sqlite3_bind_double(statement, 1, date.timeIntervalSince1970))
+                try bind(generation.uuidString, to: statement, at: 2)
+                try finishWrite(statement)
+                try check(sqlite3_reset(statement))
+            }
+        }
+    }
+
+    private func readReminders(dayRange: DateInterval?) throws -> [TodoReminder] {
+        let statement = try prepare("""
+            SELECT todo_id, generation_id, year, month, day, hour, minute, delivered_at
+            FROM todo_reminders JOIN todos ON todos.id = todo_reminders.todo_id
+            \(dayFilter)
+            ORDER BY todo_id
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bindDayRange(dayRange, to: statement)
+        var reminders: [TodoReminder] = []
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            reminders.append(try readReminder(statement))
+            result = sqlite3_step(statement)
+        }
+        guard result == SQLITE_DONE else { throw databaseError() }
+        return reminders
+    }
+
+    private func readReminder(_ statement: OpaquePointer) throws -> TodoReminder {
+        guard let id = UUID(uuidString: stringColumn(statement, index: 0)),
+              let generation = UUID(uuidString: stringColumn(statement, index: 1)),
+              let schedule = ReminderLocalTime(
+                year: Int(sqlite3_column_int64(statement, 2)),
+                month: Int(sqlite3_column_int64(statement, 3)),
+                day: Int(sqlite3_column_int64(statement, 4)),
+                hour: Int(sqlite3_column_int64(statement, 5)),
+                minute: Int(sqlite3_column_int64(statement, 6))
+              ) else { throw TodoStoreError.invalidRecord }
+        var deliveredAt: Date?
+        if sqlite3_column_type(statement, 7) != SQLITE_NULL {
+            let timestamp = sqlite3_column_double(statement, 7)
+            guard timestamp.isFinite else { throw TodoStoreError.invalidRecord }
+            deliveredAt = Date(timeIntervalSince1970: timestamp)
+        }
+        return TodoReminder(id: id, generationID: generation, schedule: schedule, deliveredAt: deliveredAt)
+    }
+
     private func configureSchema() throws {
         try withTransaction(readOnly: false) {
             let fontSizeColumn = """
@@ -447,6 +584,26 @@ final class TodoStore: @unchecked Sendable {
                     CHECK ((position_x IS NULL AND position_y IS NULL)
                         OR (position_x IS NOT NULL AND position_y IS NOT NULL))
                 );
+                CREATE TABLE IF NOT EXISTS todo_reminders (
+                    todo_id TEXT PRIMARY KEY NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+                    generation_id TEXT NOT NULL UNIQUE,
+                    year INTEGER NOT NULL CHECK (year BETWEEN 1 AND 9999),
+                    month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+                    day INTEGER NOT NULL CHECK (day BETWEEN 1 AND 31),
+                    hour INTEGER NOT NULL CHECK (hour BETWEEN 0 AND 23),
+                    minute INTEGER NOT NULL CHECK (minute BETWEEN 0 AND 59),
+                    delivered_at REAL
+                );
+                CREATE TRIGGER IF NOT EXISTS delete_reminder_on_completion
+                AFTER UPDATE OF completed_at ON todos WHEN NEW.completed_at IS NOT NULL
+                BEGIN
+                    DELETE FROM todo_reminders WHERE todo_id = NEW.id;
+                END;
+                CREATE TRIGGER IF NOT EXISTS delete_reminder_with_todo
+                AFTER DELETE ON todos
+                BEGIN
+                    DELETE FROM todo_reminders WHERE todo_id = OLD.id;
+                END;
                 CREATE TRIGGER IF NOT EXISTS hide_sticky_note_on_completion
                 AFTER UPDATE OF completed_at ON todos WHEN NEW.completed_at IS NOT NULL
                 BEGIN
