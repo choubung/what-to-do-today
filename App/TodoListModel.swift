@@ -18,12 +18,32 @@ private actor TodoRepository {
         try connection().fetchSnapshot(dayRange: Calendar.autoupdatingCurrent.dateInterval(of: .day, for: Date()))
     }
 
-    func add(title: String, showAsStickyNote: Bool) throws {
-        try connection().addTask(title: title, showAsStickyNote: showAsStickyNote)
+    func add(title: String, categoryID: UUID?, showAsStickyNote: Bool) throws {
+        try connection().addTask(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote)
     }
 
     func update(id: UUID, title: String) throws {
         try connection().updateTask(id: id, title: title)
+    }
+
+    func update(id: UUID, title: String, categoryID: UUID?) throws {
+        try connection().updateTask(id: id, title: title, categoryID: categoryID)
+    }
+
+    func setCategory(id: UUID, categoryID: UUID?) throws {
+        try connection().setCategory(id: id, categoryID: categoryID)
+    }
+
+    func createCategory(name: String) throws {
+        try connection().createCategory(name: name)
+    }
+
+    func renameCategory(id: UUID, name: String) throws {
+        try connection().renameCategory(id: id, name: name)
+    }
+
+    func deleteCategory(id: UUID) throws {
+        try connection().deleteCategory(id: id)
     }
 
     func setCompleted(id: UUID, completed: Bool) throws {
@@ -90,11 +110,16 @@ final class TodoListModel: ObservableObject {
     var onShowStickyNotes: (([UUID]) -> Void)?
 
     var tasks: [TodoItem] { snapshot.tasks }
+    var categories: [TodoCategory] { snapshot.categories }
     var stickyNotes: [StickyNoteState] { snapshot.stickyNotes }
     var incompleteTasks: [TodoItem] { tasks.filter { !$0.isCompleted } }
     var completedTasks: [TodoItem] { tasks.filter(\.isCompleted) }
     var visibleStickyCount: Int { stickyNotes.filter(\.isVisible).count }
     var defaultStickyFontSize: Double { snapshot.stickyNoteDefaultFontSize }
+
+    func categoryName(for task: TodoItem) -> String? {
+        categories.first { $0.id == task.categoryID }?.name
+    }
 
     func effectiveStickyFontSize(for note: StickyNoteState) -> Double {
         note.fontSize ?? defaultStickyFontSize
@@ -151,14 +176,34 @@ final class TodoListModel: ObservableObject {
         await task.value
     }
 
-    func add(title: String, showAsStickyNote: Bool = false) async -> Bool {
+    func add(title: String, categoryID: UUID? = nil, showAsStickyNote: Bool = false) async -> Bool {
         await save {
-            try await self.repository.add(title: title, showAsStickyNote: showAsStickyNote)
+            try await self.repository.add(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote)
         }
     }
 
     func update(id: UUID, title: String) async -> Bool {
         await save { try await self.repository.update(id: id, title: title) }
+    }
+
+    func update(id: UUID, title: String, categoryID: UUID?) async -> Bool {
+        await save { try await self.repository.update(id: id, title: title, categoryID: categoryID) }
+    }
+
+    func setCategory(id: UUID, categoryID: UUID?) async -> Bool {
+        await save { try await self.repository.setCategory(id: id, categoryID: categoryID) }
+    }
+
+    func createCategory(name: String) async -> Bool {
+        await save { try await self.repository.createCategory(name: name) }
+    }
+
+    func renameCategory(id: UUID, name: String) async -> Bool {
+        await save { try await self.repository.renameCategory(id: id, name: name) }
+    }
+
+    func deleteCategory(id: UUID) async -> Bool {
+        await save { try await self.repository.deleteCategory(id: id) }
     }
 
     @discardableResult
@@ -309,7 +354,7 @@ final class TodoListModel: ObservableObject {
 
     private func present(_ error: Error) {
         switch error as? TodoStoreError {
-        case .emptyTitle?, .missingTask?:
+        case .emptyTitle?, .missingTask?, .invalidCategoryName?, .duplicateCategoryName?, .missingCategory?:
             errorMessage = error.localizedDescription
         case .unavailableAppGroup?:
             errorMessage = "할 일 저장 공간에 접근할 수 없어요."

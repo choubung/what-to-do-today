@@ -108,6 +108,23 @@ private enum TodoListModelTests {
             model.completedTasks.contains { $0.id == task.id }
         })
 
+        let createdCategory = await model.createCategory(name: "업무")
+        precondition(createdCategory)
+        let category = model.categories.first { $0.name == "업무" }!
+        let assigned = await model.setCategory(id: first.id, categoryID: category.id)
+        precondition(assigned)
+        let categorizedTask = model.tasks.first { $0.id == first.id }!
+        precondition(model.categoryName(for: categorizedTask) == "업무")
+        let renamed = await model.renameCategory(id: category.id, name: "일")
+        precondition(renamed && model.categoryName(for: categorizedTask) == "일")
+        let duplicateCategory = await model.createCategory(name: "일")
+        precondition(!duplicateCategory && model.errorMessage == TodoStoreError.duplicateCategoryName.localizedDescription)
+        let removedCategory = await model.deleteCategory(id: category.id)
+        precondition(removedCategory && model.categories.isEmpty && model.errorMessage == nil)
+        precondition(model.tasks.first { $0.id == first.id }?.categoryID == nil)
+        let staleAssignment = await model.setCategory(id: first.id, categoryID: category.id)
+        precondition(!staleAssignment && model.errorMessage == TodoStoreError.missingCategory.localizedDescription)
+
         try store.showStickyNotes(ids: [first.id])
         await model.refresh()
         await model.setStickyFontSize(id: first.id, fontSize: 24)

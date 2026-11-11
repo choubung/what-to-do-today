@@ -1,10 +1,26 @@
 import Foundation
 
+struct TodoCategory: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let name: String
+
+    static let maximumNameLength = 30
+}
+
 struct TodoItem: Identifiable, Equatable, Sendable {
     let id: UUID
     let title: String
     let createdAt: Date
     let completedAt: Date?
+    let categoryID: UUID?
+
+    init(id: UUID, title: String, createdAt: Date, completedAt: Date?, categoryID: UUID? = nil) {
+        self.id = id
+        self.title = title
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+        self.categoryID = categoryID
+    }
 
     var isCompleted: Bool { completedAt != nil }
 }

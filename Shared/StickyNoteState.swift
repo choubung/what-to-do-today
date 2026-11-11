@@ -43,13 +43,16 @@ struct TodoSnapshot: Equatable, Sendable {
     let tasks: [TodoItem]
     let stickyNotes: [StickyNoteState]
     let stickyNoteDefaultFontSize: Double
+    let categories: [TodoCategory]
 
     init(
         tasks: [TodoItem], stickyNotes: [StickyNoteState],
-        stickyNoteDefaultFontSize: Double = StickyNoteTypography.defaultFontSize
+        stickyNoteDefaultFontSize: Double = StickyNoteTypography.defaultFontSize,
+        categories: [TodoCategory] = []
     ) {
         self.tasks = tasks
         self.stickyNotes = stickyNotes
         self.stickyNoteDefaultFontSize = stickyNoteDefaultFontSize
+        self.categories = categories
     }
 }

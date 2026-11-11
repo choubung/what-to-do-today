@@ -128,7 +128,99 @@ private enum TaskStoreTests {
         try testDayFiltering(in: directory)
         try testStickySizePersistence(in: directory)
         try testStickyFontPersistence(in: directory)
+        try testCategories(in: directory)
         print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, concurrency, and sticky-note migration/state tests.")
+    }
+
+    private static func testCategories(in directory: URL) throws {
+        let url = directory.appendingPathComponent("legacy-p1-categories.sqlite")
+        let legacyID = UUID()
+        try executeLegacySQL("""
+            CREATE TABLE todos (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL,
+                created_at REAL NOT NULL, completed_at REAL
+            );
+            INSERT INTO todos VALUES ('\(legacyID.uuidString)', '기존 할 일', 100, NULL);
+            """, at: url)
+        let store = try TodoStore(databaseURL: url)
+        let secondConnection = try TodoStore(databaseURL: url)
+        let migrated = try store.fetchSnapshot()
+        try expect(migrated.tasks == [TodoItem(id: legacyID, title: "기존 할 일", createdAt: Date(timeIntervalSince1970: 100), completedAt: nil)], "Category migration must preserve all legacy task data as uncategorized")
+        try expect(migrated.categories.isEmpty, "Migration must not invent user categories")
+
+        let work = try store.createCategory(name: "  Work  ")
+        let personal = try secondConnection.createCategory(name: "개인")
+        try expect(work.name == "Work", "Category names must trim outer whitespace")
+        try expect(try store.fetchCategories().count == 2, "Category changes must be visible across app/widget connections")
+        for invalidName in ["", " \n ", String(repeating: "가", count: 31), "줄\n바꿈"] {
+            do {
+                try store.createCategory(name: invalidName)
+                throw TestFailure(description: "Invalid category name accepted")
+            } catch TodoStoreError.invalidCategoryName {}
+        }
+        let boundary = try store.createCategory(name: String(repeating: "가", count: 30))
+        try store.deleteCategory(id: boundary.id)
+        do {
+            try secondConnection.createCategory(name: "wOrK")
+            throw TestFailure(description: "Case-insensitive duplicate category accepted")
+        } catch TodoStoreError.duplicateCategoryName {}
+        let cafe = try store.createCategory(name: "Café")
+        do {
+            try secondConnection.createCategory(name: "Cafe\u{301}")
+            throw TestFailure(description: "Canonically equivalent duplicate category accepted")
+        } catch TodoStoreError.duplicateCategoryName {}
+        try store.deleteCategory(id: cafe.id)
+
+        let task = try store.addTask(title: "분류된 할 일", categoryID: work.id, showAsStickyNote: true)
+        try secondConnection.updateTask(id: task.id, title: "제목만 수정")
+        try expect(try store.fetchTasks().first { $0.id == task.id }?.categoryID == work.id, "Title-only edits must preserve the assigned category")
+        try store.updateTask(id: task.id, title: "제목과 분류 수정", categoryID: personal.id)
+        let edited = try secondConnection.fetchTasks().first { $0.id == task.id }!
+        try expect(edited.title == "제목과 분류 수정" && edited.categoryID == personal.id, "Title and category edits must persist atomically")
+        try store.setCategory(id: task.id, categoryID: nil)
+        try expect(try secondConnection.fetchPage(index: 0, pageSize: 8).tasks.first { $0.id == task.id }?.categoryID == nil, "Widgets must read uncategorized assignments")
+        try store.setCategory(id: task.id, categoryID: work.id)
+
+        let beforeRejected = try store.fetchSnapshot()
+        for operation in [
+            { _ = try store.addTask(title: "잘못된 분류", categoryID: UUID(), showAsStickyNote: true) },
+            { try store.updateTask(id: task.id, title: "실패해야 하는 수정", categoryID: UUID()) },
+            { try store.setCategory(id: task.id, categoryID: UUID()) }
+        ] {
+            do {
+                try operation()
+                throw TestFailure(description: "A deleted or unknown category was accepted")
+            } catch TodoStoreError.missingCategory {}
+        }
+        try expect(try store.fetchSnapshot() == beforeRejected, "Stale category assignments must not partially alter tasks or create sticky notes")
+        do {
+            try store.renameCategory(id: work.id, name: "개인")
+            throw TestFailure(description: "Renaming to an existing category was accepted")
+        } catch TodoStoreError.duplicateCategoryName {}
+        try store.renameCategory(id: work.id, name: "업무")
+        try expect(try secondConnection.fetchSnapshot().categories.contains(TodoCategory(id: work.id, name: "업무")), "Renaming must retain category identity")
+        try store.setCompleted(id: task.id, completed: true)
+        let beforeDelete = try store.fetchSnapshot()
+        try secondConnection.deleteCategory(id: work.id)
+        try secondConnection.deleteCategory(id: work.id)
+        let afterDelete = try store.fetchSnapshot()
+        let preserved = afterDelete.tasks.first { $0.id == task.id }!
+        try expect(preserved.categoryID == nil && preserved.completedAt == beforeDelete.tasks.first { $0.id == task.id }?.completedAt, "Deleting a category must preserve completed tasks and completion times")
+        try expect(afterDelete.tasks.count == beforeDelete.tasks.count && afterDelete.stickyNotes == beforeDelete.stickyNotes, "Category deletion must preserve all task and sticky-note records")
+        try expect(try TodoStore(databaseURL: url).fetchSnapshot() == afterDelete, "Categories and assignments must survive reopening")
+
+        let concurrentFailures = ConcurrentFailures()
+        DispatchQueue.concurrentPerform(iterations: 2) { _ in
+            do {
+                try TodoStore(databaseURL: url).createCategory(name: "동시 카테고리")
+            } catch TodoStoreError.duplicateCategoryName {
+                // Exactly one connection wins the serialized uniqueness check.
+            } catch {
+                concurrentFailures.append(error)
+            }
+        }
+        try concurrentFailures.check()
+        try expect(try store.fetchCategories().filter { $0.name == "동시 카테고리" }.count == 1, "Concurrent category creation must not produce duplicates")
     }
 
     private static func testStickyFontPersistence(in directory: URL) throws {
