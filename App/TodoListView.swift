@@ -1,9 +1,5 @@
 import SwiftUI
 
-private enum TodoCategoryFilter: Hashable {
-    case all, category(UUID)
-}
-
 struct TodoListView: View {
     @ObservedObject var model: TodoListModel
     @ObservedObject var reminders: ReminderCoordinator
@@ -13,7 +9,7 @@ struct TodoListView: View {
     @State private var deletingTask: TodoItem?
     @State private var showingStickyPicker = false
     @State private var isSavingFontSize = false
-    @State private var categoryFilter = TodoCategoryFilter.all
+    @State private var addingCategory: TodoCategory?
     @State private var showingCategories = false
     @State private var showingNewCategory = false
     @State private var categoryMoveNotice: TodoCategory?
@@ -74,13 +70,19 @@ struct TodoListView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 
-            categoryNavigation
+            HStack {
+                Button("새 카테고리", systemImage: "plus") { showingNewCategory = true }
+                Spacer()
+                Button("카테고리 관리", systemImage: "slider.horizontal.3") { showingCategories = true }
+            }
+            .buttonStyle(.borderless).controlSize(.small)
+            .disabled(model.isLoading || model.isSaving)
+            .padding(.horizontal, 16).padding(.bottom, 12)
             if let category = categoryMoveNotice {
                 HStack(spacing: 8) {
                     Text("‘\(category.name)’ 카테고리로 이동했어요.")
                         .font(.caption).lineLimit(2)
                     Spacer(minLength: 0)
-                    Button("보기") { categoryFilter = .category(category.id) }
                     Button { categoryMoveNotice = nil } label: { Image(systemName: "xmark") }
                         .buttonStyle(.plain).accessibilityLabel("이동 안내 닫기")
                 }
@@ -90,21 +92,12 @@ struct TodoListView: View {
 
             if model.isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filteredTasks.isEmpty {
-                ContentUnavailableView {
-                    Label(categoryFilter == .all ? "할 일을 적어보세요" : "이 카테고리에는 할 일이 없어요", systemImage: "checklist")
-                } description: {
-                    Text("오늘 할 일을 하나씩 정리해 보세요.")
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        taskSection("할 일", tasks: filteredTasks.filter { !$0.isCompleted })
-                        taskSection(
-                            "완료", tasks: filteredTasks.filter(\.isCompleted),
-                            topSpacing: filteredTasks.contains { !$0.isCompleted } ? 24 : 0
-                        )
+                    LazyVStack(alignment: .leading, spacing: 24) {
+                        ForEach(model.categories) { category in
+                            categorySection(category)
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
@@ -116,6 +109,9 @@ struct TodoListView: View {
         .sheet(item: $editingTask) { task in
             EditTaskView(model: model, task: task, didMoveCategory: showCategoryMoveNotice)
         }
+        .sheet(item: $addingCategory) { category in
+            CategoryTaskEntry(model: model, categoryID: category.id)
+        }
         .sheet(isPresented: $showingStickyPicker) {
             StickyNotePickerView(model: model)
         }
@@ -123,7 +119,7 @@ struct TodoListView: View {
             TodoCategoryManager(model: model)
         }
         .sheet(isPresented: $showingNewCategory) {
-            TodoCategoryNameEditor(model: model) { id in categoryFilter = .category(id) }
+            TodoCategoryNameEditor(model: model)
         }
         .sheet(isPresented: $showingReminderSettings) {
             ReminderSettingsView(coordinator: reminders)
@@ -144,7 +140,7 @@ struct TodoListView: View {
             Text(task.title)
         }
         .alert("처리하지 못했어요", isPresented: Binding(
-            get: { model.errorMessage != nil && editingTask == nil && reminderTask == nil && !showingReminderSettings && !showingStickyPicker && !showingCategories && !showingNewCategory && controlActiveState == .key },
+            get: { model.errorMessage != nil && addingCategory == nil && editingTask == nil && reminderTask == nil && !showingReminderSettings && !showingStickyPicker && !showingCategories && !showingNewCategory && controlActiveState == .key },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
             Button("다시 불러오기") {
@@ -157,68 +153,42 @@ struct TodoListView: View {
         }
         .onAppear { isEntryFocused = true }
         .onChange(of: model.categories) { _, categories in
-            let ids = Set(categories.map(\.id))
-            if case let .category(id) = categoryFilter, !ids.contains(id) { categoryFilter = .all }
             if let notice = categoryMoveNotice {
                 categoryMoveNotice = categories.first { $0.id == notice.id }
             }
         }
-        .onChange(of: categoryFilter) { _, _ in categoryMoveNotice = nil }
     }
 
     private var additionCategory: TodoCategory? {
-        let id: UUID?
-        if case let .category(selectedID) = categoryFilter { id = selectedID }
-        else { id = model.defaultCategoryID }
-        return model.categories.first { $0.id == id }
+        model.categories.first { $0.id == model.defaultCategoryID }
     }
 
-    private var filteredTasks: [TodoItem] {
-        model.tasks.filter { task in
-            switch categoryFilter {
-            case .all: true
-            case .category(let id): task.categoryID == id
-            }
-        }
-    }
-
-    private var categoryNavigation: some View {
-        HStack(spacing: 8) {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    HStack(spacing: 6) {
-                        categoryChip("전체", filter: .all)
-                        ForEach(model.categories) { category in
-                            categoryChip(category.name, filter: .category(category.id))
-                        }
-                    }
-                    .padding(.vertical, 3)
+    private func categorySection(_ category: TodoCategory) -> some View {
+        let tasks = model.tasks.filter { $0.categoryID == category.id }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(category.name).font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                Button { addingCategory = category } label: {
+                    Image(systemName: "plus").frame(width: 24, height: 24)
                 }
-                .scrollIndicators(.hidden)
-                .frame(height: 34)
-                .onChange(of: categoryFilter) { _, filter in proxy.scrollTo(filter, anchor: .center) }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("\(category.name)에 할 일 추가")
+                .help("\(category.name)에 할 일 추가")
+                .disabled(model.isSaving || model.isLoading)
             }
-            Button { showingNewCategory = true } label: { Image(systemName: "plus") }
-                .help("새 카테고리").accessibilityLabel("새 카테고리")
-            Button { showingCategories = true } label: { Image(systemName: "slider.horizontal.3") }
-                .help("카테고리 관리").accessibilityLabel("카테고리 관리")
+            Divider().padding(.bottom, 4)
+            if tasks.isEmpty {
+                Text("할 일이 없어요")
+                    .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
+            } else {
+                taskSection("할 일", tasks: tasks.filter { !$0.isCompleted })
+                taskSection("완료", tasks: tasks.filter(\.isCompleted), topSpacing: 8)
+            }
         }
-        .buttonStyle(.borderless).controlSize(.small)
-        .disabled(model.isLoading || model.isSaving)
-        .padding(.horizontal, 16).padding(.bottom, 12)
-    }
-
-    private func categoryChip(_ name: String, filter: TodoCategoryFilter) -> some View {
-        Button { categoryFilter = filter } label: {
-            Text(name).font(.callout).lineLimit(1).frame(maxWidth: 160)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .foregroundStyle(categoryFilter == filter ? Color.accentColor : Color.secondary)
-                .background(categoryFilter == filter ? Color.accentColor.opacity(0.12) : Color.clear, in: Capsule())
-        }
-        .buttonStyle(.plain).id(filter)
-        .accessibilityLabel("\(name) 카테고리")
-        .accessibilityAddTraits(categoryFilter == filter ? [.isSelected] : [])
-        .help(name)
+        .id(category.id)
     }
 
     private var stickyManagementMenu: some View {
@@ -293,21 +263,18 @@ struct TodoListView: View {
                     )
                 }
             } header: {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("\(title) · \(tasks.count)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                if title == "완료" {
+                    Text("완료 · \(tasks.count)")
+                        .font(.caption).foregroundStyle(.secondary)
                         .accessibilityAddTraits(.isHeader)
-                    Divider()
+                        .padding(.top, topSpacing).padding(.bottom, 4)
                 }
-                .padding(.top, topSpacing)
-                .padding(.bottom, 4)
             }
         }
     }
 
     private func showCategoryMoveNotice(_ category: TodoCategory) {
-        if case let .category(id) = categoryFilter, id != category.id { categoryMoveNotice = category }
+        categoryMoveNotice = category
     }
 
     private func addTask() {
@@ -363,17 +330,6 @@ private struct TodoTaskRow: View {
                 .strikethrough(isCompleted, color: .secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-                if let category = model.categoryName(for: task) {
-                    Menu { categoryActions(task) } label: {
-                        Label(category, systemImage: "folder")
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    .menuStyle(.borderlessButton).fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 180, alignment: .leading)
-                    .disabled(isBusy)
-                    .accessibilityLabel("\(task.title) 카테고리 변경: \(category)")
-                    .help("카테고리 변경")
-                }
                 if let reminder = model.reminder(for: task.id), let date = reminder.schedule.date() {
                     Label {
                         Text(date, format: .dateTime.month().day().hour().minute())
@@ -591,6 +547,51 @@ private struct EditTaskView: View {
         .disabled(model.isSaving)
         .interactiveDismissDisabled(model.isSaving)
         .onAppear { model.errorMessage = nil; isFocused = true }
+    }
+}
+
+private struct CategoryTaskEntry: View {
+    @ObservedObject var model: TodoListModel
+    let categoryID: UUID
+    @State private var title = ""
+    @State private var showAsStickyNote = false
+    @FocusState private var isFocused: Bool
+    @Environment(\.dismiss) private var dismiss
+    private var category: TodoCategory? { model.categories.first { $0.id == categoryID } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(category.map { "\($0.name)에 할 일 추가" } ?? "카테고리를 찾을 수 없어요")
+                .font(.headline)
+            TextField("할 일", text: $title)
+                .textFieldStyle(.roundedBorder).focused($isFocused).onSubmit(save)
+            Toggle("추가 후 포스트잇 표시", isOn: $showAsStickyNote).toggleStyle(.checkbox)
+            if category == nil {
+                Text("입력 내용을 복사한 뒤 다른 카테고리에서 추가해 주세요.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            if let error = model.errorMessage { Text(error).foregroundStyle(.red).font(.callout) }
+            HStack {
+                Spacer()
+                Button("취소") { model.errorMessage = nil; dismiss() }.keyboardShortcut(.cancelAction)
+                Button("추가", action: save).keyboardShortcut(.defaultAction)
+                    .disabled(category == nil || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24).frame(width: 360)
+        .disabled(model.isSaving || model.isLoading)
+        .interactiveDismissDisabled()
+        .onAppear { model.errorMessage = nil; isFocused = true }
+    }
+
+    private func save() {
+        guard category != nil, !model.isSaving, !model.isLoading,
+              !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let submittedTitle = title
+        let sticky = showAsStickyNote
+        Task {
+            if await model.add(title: submittedTitle, categoryID: categoryID, showAsStickyNote: sticky) { dismiss() }
+        }
     }
 }
 
