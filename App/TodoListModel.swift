@@ -42,6 +42,10 @@ private actor TodoRepository {
         try connection().createCategory(name: name).id
     }
 
+    func reorderCategories(ids: [UUID]) throws {
+        try connection().reorderCategories(ids: ids)
+    }
+
     func renameCategory(id: UUID, name: String) throws {
         try connection().renameCategory(id: id, name: name)
     }
@@ -240,6 +244,10 @@ final class TodoListModel: ObservableObject {
         return succeeded ? createdID : nil
     }
 
+    func reorderCategories(ids: [UUID]) async -> Bool {
+        await save { try await self.repository.reorderCategories(ids: ids) }
+    }
+
     func renameCategory(id: UUID, name: String) async -> Bool {
         await save { try await self.repository.renameCategory(id: id, name: name) }
     }
@@ -431,7 +439,7 @@ final class TodoListModel: ObservableObject {
 
     private func present(_ error: Error) {
         switch error as? TodoStoreError {
-        case .invalidReminder?, .completedTaskReminder?, .emptyTitle?, .missingTask?, .invalidCategoryName?, .duplicateCategoryName?, .missingCategory?, .lastCategory?, .invalidCategoryDestination?:
+        case .invalidReminder?, .completedTaskReminder?, .emptyTitle?, .missingTask?, .invalidCategoryName?, .duplicateCategoryName?, .missingCategory?, .lastCategory?, .invalidCategoryDestination?, .invalidCategoryOrder?:
             errorMessage = error.localizedDescription
         case .unavailableAppGroup?:
             errorMessage = "할 일 저장 공간에 접근할 수 없어요."

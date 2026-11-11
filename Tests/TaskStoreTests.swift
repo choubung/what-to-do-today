@@ -37,10 +37,44 @@ private final class ConcurrentFailures: @unchecked Sendable {
 
 @main
 private enum TaskStoreTests {
+    private static func testCategoryOrder(in directory: URL) throws {
+        let url = directory.appendingPathComponent("category-order.sqlite")
+        let store = try TodoStore(databaseURL: url)
+        let defaultID = try store.fetchCategories()[0].id
+        let work = try store.createCategory(name: "업무")
+        let personal = try store.createCategory(name: "개인")
+        let order = [personal.id, work.id, defaultID]
+        try store.reorderCategories(ids: order)
+        try store.renameCategory(id: personal.id, name: "취미")
+        let reopened = try TodoStore(databaseURL: url)
+        try expect(try reopened.fetchCategories().map(\.id) == order, "Order must survive rename and reopening, including moving the default")
+        try expect(try reopened.addTask(title: "기본 추가").categoryID == defaultID, "Moving the default must not change automatic assignment")
+        for invalid in [[personal.id, work.id], [personal.id, personal.id, defaultID], [personal.id, work.id, UUID()]] {
+            do {
+                try store.reorderCategories(ids: invalid)
+                throw TestFailure(description: "Invalid category order accepted")
+            } catch TodoStoreError.invalidCategoryOrder {}
+        }
+        try expect(try store.fetchCategories().map(\.id) == order, "Rejected stale orders must not modify saved positions")
+        try executeLegacySQL("CREATE TRIGGER fail_order BEFORE UPDATE OF sort_order ON categories WHEN NEW.id = '\(work.id.uuidString)' BEGIN SELECT RAISE(ABORT, 'order failure'); END;", at: url)
+        do {
+            try store.reorderCategories(ids: [defaultID, work.id, personal.id])
+            throw TestFailure(description: "Injected reorder failure ignored")
+        } catch TodoStoreError.database {}
+        try expect(try store.fetchCategories().map(\.id) == order, "Partial reorder failure must roll back every position")
+        try executeLegacySQL("DROP TRIGGER fail_order", at: url)
+        let added = try store.createCategory(name: "새 분류")
+        try expect(try store.fetchCategories().map(\.id) == order + [added.id], "New categories append after saved order")
+        try store.deleteCategory(id: work.id, movingTasksTo: personal.id)
+        try expect(try store.fetchCategories().map(\.id) == [personal.id, defaultID, added.id], "Deletion preserves relative ordering")
+    }
+
     static func main() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("what-to-do-today-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
+
+        try testCategoryOrder(in: directory)
 
         let startupFailures = ConcurrentFailures()
         // Opening an existing WAL database misses the initial journal-mode transition race.

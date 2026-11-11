@@ -5,59 +5,20 @@ struct TodoListView: View {
     @ObservedObject var reminders: ReminderCoordinator
     @State private var listPosition = ScrollPosition(edge: .top)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var newTitle = ""
-    @State private var showNewTaskAsStickyNote = false
     @State private var editingTask: TodoItem?
     @State private var deletingTask: TodoItem?
     @State private var showingStickyPicker = false
     @State private var isSavingFontSize = false
     @State private var addingCategory: TodoCategory?
     @State private var showingCategories = false
-    @State private var showingNewCategory = false
     @State private var categoryMoveNotice: TodoCategory?
     @State private var showingCompletionHistory = false
     @State private var showingReminderSettings = false
     @State private var reminderTask: TodoItem?
-    @FocusState private var isEntryFocused: Bool
     @Environment(\.controlActiveState) private var controlActiveState
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                TextField("할 일 추가", text: $newTitle)
-                    .textFieldStyle(.plain)
-                    .font(.body)
-                    .focused($isEntryFocused)
-                    .onSubmit(addTask)
-                    .disabled(model.isSaving)
-                Button(action: addTask) {
-                    Image(systemName: "plus")
-                        .fontWeight(.semibold)
-                        .frame(width: 18, height: 18)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isSaving || model.isLoading || additionCategory == nil)
-                .help("할 일 추가")
-                .accessibilityLabel("할 일 추가")
-            }
-            .padding(16)
-
-            HStack {
-                Toggle("추가 후 포스트잇 표시", isOn: $showNewTaskAsStickyNote)
-                .toggleStyle(.checkbox)
-                .controlSize(.small)
-                .disabled(model.isSaving)
-                Spacer()
-                if let category = additionCategory {
-                    Text("\(category.name)에 추가")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
-                        .help("새 할 일은 ‘\(category.name)’ 카테고리에 추가됩니다.")
-                }
-            }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-
             HStack {
                 Text("오늘의 목록")
                     .font(.subheadline)
@@ -78,7 +39,6 @@ struct TodoListView: View {
             .padding(.vertical, 10)
 
             HStack {
-                Button("새 카테고리", systemImage: "plus") { showingNewCategory = true }
                 Spacer()
                 Button("카테고리 관리", systemImage: "slider.horizontal.3") { showingCategories = true }
             }
@@ -126,9 +86,6 @@ struct TodoListView: View {
         .sheet(isPresented: $showingCategories) {
             TodoCategoryManager(model: model)
         }
-        .sheet(isPresented: $showingNewCategory) {
-            TodoCategoryNameEditor(model: model)
-        }
         .sheet(isPresented: $showingCompletionHistory) {
             CompletionHistoryView(model: model, initialCategoryID: nil)
         }
@@ -151,7 +108,7 @@ struct TodoListView: View {
             Text(task.title)
         }
         .alert("처리하지 못했어요", isPresented: Binding(
-            get: { model.errorMessage != nil && !showingCompletionHistory && addingCategory == nil && editingTask == nil && reminderTask == nil && !showingReminderSettings && !showingStickyPicker && !showingCategories && !showingNewCategory && controlActiveState == .key },
+            get: { model.errorMessage != nil && !showingCompletionHistory && addingCategory == nil && editingTask == nil && reminderTask == nil && !showingReminderSettings && !showingStickyPicker && !showingCategories && controlActiveState == .key },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
             Button("다시 불러오기") {
@@ -162,16 +119,11 @@ struct TodoListView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
-        .onAppear { isEntryFocused = true }
         .onChange(of: model.categories) { _, categories in
             if let notice = categoryMoveNotice {
                 categoryMoveNotice = categories.first { $0.id == notice.id }
             }
         }
-    }
-
-    private var additionCategory: TodoCategory? {
-        model.categories.first { $0.id == model.defaultCategoryID }
     }
 
     private func statusSection(completed: Bool) -> some View {
@@ -295,21 +247,7 @@ struct TodoListView: View {
         categoryMoveNotice = category
     }
 
-    private func addTask() {
-        guard !model.isSaving, !model.isLoading, let category = additionCategory,
-              !newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let title = newTitle
-        let showAsStickyNote = showNewTaskAsStickyNote
-        let categoryID = category.id
-        Task {
-            if await model.add(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote) {
-                newTitle = ""
-                showNewTaskAsStickyNote = false
-                categoryMoveNotice = nil
-            }
-            isEntryFocused = true
-        }
-    }
+
 }
 
 // Resolve current data by identity so moving between sections cannot retain a stale task.
@@ -722,6 +660,7 @@ private struct TodoCategoryManager: View {
     @ObservedObject var model: TodoListModel
     @Environment(\.dismiss) private var dismiss
     @State private var activeSheet: CategoryManagementSheet?
+    @State private var displayedCategories: [TodoCategory] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -731,13 +670,15 @@ private struct TodoCategoryManager: View {
                 Button("새 카테고리", systemImage: "plus") { activeSheet = .create }
                     .controlSize(.small)
             }
-            Text("할 일은 하나의 카테고리에 속해요. 개수에는 이전에 완료한 할 일도 포함돼요.")
-                .font(.callout).foregroundStyle(.secondary)
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(model.categories) { category in
+            List {
+                    ForEach(displayedCategories) { category in
                         HStack(spacing: 12) {
-                            Image(systemName: "folder").foregroundStyle(.secondary)
+                            Image(systemName: "line.3.horizontal")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24, height: 32)
+                                .contentShape(Rectangle())
+                                .help("드래그하여 순서 변경")
+                                .accessibilityLabel("\(category.name) 순서 변경")
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(category.name).lineLimit(2)
                                 Text(category.isDefault ? "\(category.taskCount)개 · 기본 추가 카테고리" : "\(category.taskCount)개")
@@ -752,11 +693,22 @@ private struct TodoCategoryManager: View {
                                 .accessibilityLabel("\(category.name) 삭제")
                         }
                         .controlSize(.small).padding(.vertical, 10)
-                        if category.id != model.categories.last?.id { Divider() }
                     }
-                }
+                    .onMove { offsets, destination in
+                        // Update the list immediately so the native drop animation never snaps back.
+                        displayedCategories.move(fromOffsets: offsets, toOffset: destination)
+                        let ids = displayedCategories.map(\.id)
+                        Task {
+                            _ = await model.reorderCategories(ids: ids)
+                            displayedCategories = model.categories
+                        }
+                    }
             }
-            .frame(maxHeight: 260)
+            .listStyle(.inset)
+            .frame(height: 260)
+            if activeSheet == nil, let error = model.errorMessage {
+                Text(error).font(.callout).foregroundStyle(.red)
+            }
             HStack {
                 Spacer()
                 Button("완료") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -764,6 +716,10 @@ private struct TodoCategoryManager: View {
         }
         .padding(24).frame(width: 440)
         .disabled(model.isSaving || model.isLoading)
+        .onAppear { displayedCategories = model.categories }
+        .onChange(of: model.categories) { _, categories in
+            displayedCategories = categories
+        }
         .interactiveDismissDisabled(model.isSaving)
         .sheet(item: $activeSheet) { sheet in
             switch sheet {

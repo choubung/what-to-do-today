@@ -9,6 +9,7 @@ enum TodoStoreError: LocalizedError {
     case invalidCategoryName
     case duplicateCategoryName
     case missingCategory
+    case invalidCategoryOrder
     case lastCategory
     case invalidCategoryDestination
     case unavailableAppGroup
@@ -32,6 +33,8 @@ enum TodoStoreError: LocalizedError {
             return "같은 이름의 카테고리가 이미 있어요."
         case .missingCategory:
             return "이 카테고리를 찾을 수 없어요. 다시 선택해 주세요."
+        case .invalidCategoryOrder:
+            return "카테고리 목록이 변경됐어요. 다시 순서를 정해 주세요."
         case .lastCategory:
             return "카테고리는 최소 하나가 필요해요. 마지막 카테고리는 삭제할 수 없어요."
         case .invalidCategoryDestination:
@@ -276,13 +279,35 @@ final class TodoStore: @unchecked Sendable {
         defer { lock.unlock() }
         return try withTransaction(readOnly: false) {
             try requireUniqueCategoryName(name)
-            let statement = try prepare("INSERT INTO categories (id, name, name_key) VALUES (?, ?, ?)")
+            let statement = try prepare("INSERT INTO categories (id, name, name_key, sort_order) VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM categories))")
             defer { sqlite3_finalize(statement) }
             try bind(category.id.uuidString, to: statement, at: 1)
             try bind(name, to: statement, at: 2)
             try bind(categoryNameKey(name), to: statement, at: 3)
             try finishWrite(statement)
             return category
+        }
+    }
+
+    func reorderCategories(ids: [UUID]) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try withTransaction(readOnly: false) {
+            let currentIDs = try readCategories().map(\.id)
+            guard ids.count == Set(ids).count, Set(ids) == Set(currentIDs) else {
+                throw TodoStoreError.invalidCategoryOrder
+            }
+            try writeCategoryOrder(ids)
+        }
+    }
+
+    private func writeCategoryOrder(_ ids: [UUID]) throws {
+        for (position, id) in ids.enumerated() {
+            let statement = try prepare("UPDATE categories SET sort_order = ? WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try check(sqlite3_bind_int64(statement, 1, Int64(position)))
+            try bind(id.uuidString, to: statement, at: 2)
+            try finishWrite(statement)
         }
     }
 
@@ -693,6 +718,11 @@ final class TodoStore: @unchecked Sendable {
             try execute("CREATE INDEX IF NOT EXISTS todos_category ON todos(category_id)")
             try execute("CREATE INDEX IF NOT EXISTS todos_completion_date ON todos(completed_at DESC, id ASC)")
             try configureRequiredCategories()
+            if try !tableColumns("categories").contains("sort_order") {
+                try execute("ALTER TABLE categories ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+                // Retain the previous default-first/name ordering on the first upgrade.
+                try writeCategoryOrder(readCategories().map(\.id))
+            }
         }
     }
 
@@ -993,7 +1023,7 @@ final class TodoStore: @unchecked Sendable {
             SELECT c.id, c.name, c.id = s.default_category_id,
                 (SELECT COUNT(*) FROM todos t WHERE t.category_id = c.id)
             FROM categories c JOIN category_settings s ON s.singleton = 1
-            ORDER BY (c.id = s.default_category_id) DESC, c.name_key, c.id
+            ORDER BY c.sort_order, (c.id = s.default_category_id) DESC, c.name_key, c.id
             """)
         defer { sqlite3_finalize(statement) }
         var categories: [TodoCategory] = []
