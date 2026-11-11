@@ -29,6 +29,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         configureMenu()
         _ = stickyNotes
         configureDateTracking()
+        WidgetCenter.shared.reloadTimelines(ofKind: "WhatToDoTodayWidget")
         // URL launch events arrive during startup. Defer the default window until they are handled.
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.openedFromURL else { return }
