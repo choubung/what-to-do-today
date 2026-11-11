@@ -64,6 +64,14 @@ struct TodoListView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 32) {
                         statusSection(completed: false)
+                        if !model.upcomingTasks.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("예정된 할 일")
+                                    .font(.title2.weight(.bold))
+                                    .accessibilityAddTraits(.isHeader)
+                                taskRows(model.upcomingTasks, upcoming: true)
+                            }
+                        }
                         statusSection(completed: true)
                     }
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.completedTasks.map(\.id))
@@ -255,11 +263,12 @@ struct TodoListView: View {
         }
     }
 
-    private func taskRows(_ tasks: [TodoItem]) -> some View {
+    private func taskRows(_ tasks: [TodoItem], upcoming: Bool = false) -> some View {
         ForEach(tasks) { task in
             TodoTaskRow(
                 model: model,
                 taskID: task.id,
+                upcoming: upcoming,
                 edit: { editingTask = $0 },
                 delete: { deletingTask = $0 },
                 editReminder: { reminderTask = $0 },
@@ -281,13 +290,14 @@ struct TodoListView: View {
 private struct TodoTaskRow: View {
     @ObservedObject var model: TodoListModel
     let taskID: UUID
+    let upcoming: Bool
     let edit: (TodoItem) -> Void
     let delete: (TodoItem) -> Void
     let editReminder: (TodoItem) -> Void
     let didMoveCategory: (TodoCategory) -> Void
 
     var body: some View {
-        if let task = model.tasks.first(where: { $0.id == taskID }) {
+        if let task = model.task(id: taskID) {
             taskContent(task)
         }
     }
@@ -312,6 +322,13 @@ private struct TodoTaskRow: View {
                 .strikethrough(isCompleted, color: .secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
+                if upcoming, let day = task.plannedDay, let date = TodoPlannedDay.date(for: day) {
+                    HStack(spacing: 6) {
+                        Text(date, format: .dateTime.month().day().year())
+                        if let category = model.categoryName(for: task) { Text(category) }
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
+                }
                 if let reminder = model.reminder(for: task.id), let date = reminder.schedule.date() {
                     Label {
                         Text(date, format: .dateTime.month().day().hour().minute())
@@ -360,7 +377,7 @@ private struct TodoTaskRow: View {
             Button("알림…", systemImage: "bell") { editReminder(task) }.disabled(isBusy)
             Divider()
         }
-        if !model.completionValue(for: task) {
+        if !upcoming && !model.completionValue(for: task) {
             Button(model.isStickyVisible(for: task.id) ? "포스트잇 앞으로 가져오기" : "포스트잇 띄우기", systemImage: "note") {
                 Task { _ = await model.showStickyNotes([task.id]) }
             }
@@ -478,6 +495,7 @@ private struct EditTaskView: View {
     let didMoveCategory: (TodoCategory) -> Void
     @State private var title: String
     @State private var categoryID: UUID?
+    @State private var plannedDate: Date?
     @Environment(\.dismiss) private var dismiss
     @FocusState private var isFocused: Bool
 
@@ -487,6 +505,7 @@ private struct EditTaskView: View {
         self.didMoveCategory = didMoveCategory
         _title = State(initialValue: task.title)
         _categoryID = State(initialValue: task.categoryID)
+        _plannedDate = State(initialValue: task.plannedDay.flatMap(TodoPlannedDay.date(for:)))
     }
 
     var body: some View {
@@ -498,6 +517,7 @@ private struct EditTaskView: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($isFocused)
                 .disabled(model.isSaving)
+            if !task.isCompleted { PlannedDatePicker(date: $plannedDate) }
             if let error = model.errorMessage {
                 Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
             }
@@ -509,8 +529,8 @@ private struct EditTaskView: View {
                 }.keyboardShortcut(.cancelAction)
                 Button("저장") {
                     Task {
-                        if await model.update(id: task.id, title: title, categoryID: categoryID) {
-                            if let updated = model.tasks.first(where: { $0.id == task.id }),
+                        if await model.update(id: task.id, title: title, categoryID: categoryID, plannedDay: plannedDate.map(TodoPlannedDay.key(for:))) {
+                            if let updated = model.task(id: task.id),
                                updated.categoryID != task.categoryID,
                                let category = model.categories.first(where: { $0.id == updated.categoryID }) {
                                 didMoveCategory(category)
@@ -537,6 +557,7 @@ private struct CategoryTaskEntry: View {
     let categoryID: UUID
     let onAdded: () -> Void
     @State private var title = ""
+    @State private var plannedDate: Date?
     @State private var showAsStickyNote = false
     @FocusState private var isFocused: Bool
     @Environment(\.dismiss) private var dismiss
@@ -548,7 +569,10 @@ private struct CategoryTaskEntry: View {
                 .font(.headline)
             TextField("할 일", text: $title)
                 .textFieldStyle(.roundedBorder).focused($isFocused).onSubmit(save)
-            Toggle("추가 후 포스트잇 표시", isOn: $showAsStickyNote).toggleStyle(.checkbox)
+            PlannedDatePicker(date: $plannedDate)
+            if !isFuturePlan {
+                Toggle("추가 후 포스트잇 표시", isOn: $showAsStickyNote).toggleStyle(.checkbox)
+            }
             if category == nil {
                 Text("입력 내용을 복사한 뒤 다른 카테고리에서 추가해 주세요.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -567,13 +591,18 @@ private struct CategoryTaskEntry: View {
         .onAppear { model.errorMessage = nil; isFocused = true }
     }
 
+    private var isFuturePlan: Bool {
+        plannedDate.map(TodoPlannedDay.key(for:)).map { $0 > TodoPlannedDay.key(for: Date()) } ?? false
+    }
+
     private func save() {
         guard category != nil, !model.isSaving, !model.isLoading,
               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let submittedTitle = title
-        let sticky = showAsStickyNote
+        let sticky = showAsStickyNote && !isFuturePlan
+        let day = plannedDate.map(TodoPlannedDay.key(for:))
         Task {
-            if await model.add(title: submittedTitle, categoryID: categoryID, showAsStickyNote: sticky) {
+            if await model.add(title: submittedTitle, categoryID: categoryID, showAsStickyNote: sticky, plannedDay: day) {
                 onAdded()
                 dismiss()
             }
@@ -585,6 +614,7 @@ struct QuickAddView: View {
     @ObservedObject var model: TodoListModel
     let onSave: () -> Void
     @State private var title = ""
+    @State private var plannedDate: Date?
     @State private var showAsStickyNote = false
     @State private var categoryID: UUID?
     @FocusState private var isFocused: Bool
@@ -597,14 +627,17 @@ struct QuickAddView: View {
                 .onSubmit(save)
                 .disabled(model.isSaving)
             TodoCategoryPicker(model: model, selection: $categoryID)
+            PlannedDatePicker(date: $plannedDate).disabled(model.isSaving)
             if let error = model.errorMessage {
                 Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
             }
             HStack {
-                Toggle("추가 후 포스트잇 표시", isOn: $showAsStickyNote)
-                    .toggleStyle(.checkbox)
-                    .controlSize(.small)
-                    .disabled(model.isSaving)
+                if !isFuturePlan {
+                    Toggle("추가 후 포스트잇 표시", isOn: $showAsStickyNote)
+                        .toggleStyle(.checkbox)
+                        .controlSize(.small)
+                        .disabled(model.isSaving)
+                }
                 Spacer()
                 Button("추가", action: save)
                     .keyboardShortcut(.defaultAction)
@@ -616,18 +649,49 @@ struct QuickAddView: View {
         .onAppear { isFocused = true }
     }
 
+    private var isFuturePlan: Bool {
+        plannedDate.map(TodoPlannedDay.key(for:)).map { $0 > TodoPlannedDay.key(for: Date()) } ?? false
+    }
+
     private func save() {
         guard !model.isSaving, !model.isLoading, model.defaultCategoryID != nil,
               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let submittedTitle = title
-        let submittedStickyChoice = showAsStickyNote
+        let submittedStickyChoice = showAsStickyNote && !isFuturePlan
+        let day = plannedDate.map(TodoPlannedDay.key(for:))
         let submittedCategoryID = categoryID ?? model.defaultCategoryID
         Task {
-            if await model.add(title: submittedTitle, categoryID: submittedCategoryID, showAsStickyNote: submittedStickyChoice) {
+            if await model.add(title: submittedTitle, categoryID: submittedCategoryID, showAsStickyNote: submittedStickyChoice, plannedDay: day) {
                 title = ""
+                plannedDate = nil
                 showAsStickyNote = false
                 categoryID = model.defaultCategoryID
                 onSave()
+            }
+        }
+    }
+}
+
+
+private struct PlannedDatePicker: View {
+    @Binding var date: Date?
+
+    var body: some View {
+        HStack {
+            Toggle("날짜 지정", isOn: Binding(
+                get: { date != nil },
+                set: { enabled in
+                    date = enabled ? Calendar.autoupdatingCurrent.date(byAdding: .day, value: 1, to: Date()) : nil
+                }
+            ))
+            .toggleStyle(.checkbox)
+            if let selected = date {
+                DatePicker("예정 날짜", selection: Binding(
+                    get: { date ?? selected },
+                    set: { date = $0 }
+                ), displayedComponents: .date)
+                .labelsHidden()
+                .accessibilityLabel("예정 날짜")
             }
         }
     }

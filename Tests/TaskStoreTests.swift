@@ -161,6 +161,7 @@ private enum TaskStoreTests {
         try testAddTaskWithStickyNote(in: directory)
         try testDayFiltering(in: directory)
         try testTodayOnlyPagination(in: directory)
+        try testPlannedTasks(in: directory)
         try testCompletionCalendar(in: directory)
         try testStickySizePersistence(in: directory)
         try testStickyFontPersistence(in: directory)
@@ -757,6 +758,42 @@ private enum TaskStoreTests {
             try expect(try store.fetchTasks().count == fixtures.count, "Today filtering must retain every stored task")
             try expect(try store.fetchSnapshot().tasks.count == fixtures.count, "Unfiltered snapshot callers must retain their previous behavior")
         }
+    }
+
+    private static func testPlannedTasks(in directory: URL) throws {
+        let calendar = Calendar.autoupdatingCurrent
+        let today = calendar.dateInterval(of: .day, for: Date())!
+        let tomorrow = calendar.dateInterval(of: .day, for: today.end)!
+        let followingDay = calendar.dateInterval(of: .day, for: tomorrow.end)!
+        let day = TodoPlannedDay.key(for: tomorrow.start)
+        let url = directory.appendingPathComponent("planned-tasks.sqlite")
+        let store = try TodoStore(databaseURL: url)
+        let current = try store.addTask(title: "일반 할 일")
+        let future = try store.addTask(title: "미리 적은 일", showAsStickyNote: true, plannedDay: day)
+
+        let todaySnapshot = try store.fetchSnapshot(dayRange: today, includeUpcoming: true)
+        try expect(todaySnapshot.tasks.map(\.id) == [current.id] && todaySnapshot.upcomingTasks.map(\.id) == [future.id], "Planned tasks belong only to the upcoming list before their date")
+        try expect(todaySnapshot.stickyNotes.isEmpty, "Adding an upcoming task does not open a sticky note")
+        let todayPage = try store.fetchPage(index: 9, pageSize: 1, dayRange: today)
+        try expect(todayPage.tasks.map(\.id) == [current.id] && todayPage.totalCount == 1 && todayPage.index == 0, "Widget totals and rows both exclude future plans")
+
+        let reopened = try TodoStore(databaseURL: url)
+        try reopened.updateTask(id: future.id, title: "제목 변경", categoryID: future.categoryID)
+        for range in [tomorrow, followingDay] {
+            let snapshot = try reopened.fetchSnapshot(dayRange: range, includeUpcoming: true)
+            let page = try reopened.fetchPage(index: 0, pageSize: 8, dayRange: range)
+            try expect(snapshot.upcomingTasks.isEmpty && page.tasks == snapshot.tasks, "Due and overdue plans enter the same app and widget lists")
+            try expect(page.tasks.first { $0.id == future.id }?.plannedDay == day, "The plan survives reopening and a title/category edit")
+        }
+
+        try reopened.updateTask(id: current.id, title: current.title, categoryID: current.categoryID, plannedDay: day)
+        try expect(try reopened.fetchSnapshot(dayRange: today, includeUpcoming: true).upcomingTasks.count == 2, "Moving an existing task to a future date moves it into upcoming")
+        try reopened.updateTask(id: future.id, title: "날짜 해제", categoryID: future.categoryID, plannedDay: nil)
+        try expect(try reopened.fetchPage(index: 0, pageSize: 8, dayRange: today).tasks.map(\.id) == [future.id], "Clearing the plan immediately returns the task to today")
+        try reopened.setCompleted(id: current.id, completed: true)
+        try expect(try reopened.fetchSnapshot(dayRange: today, includeUpcoming: true).tasks.contains { $0.id == current.id && $0.isCompleted }, "Completing early uses the actual completion date")
+        try reopened.setCompleted(id: current.id, completed: false)
+        try expect(try reopened.fetchSnapshot(dayRange: today, includeUpcoming: true).upcomingTasks.map(\.id) == [current.id], "Undo restores an early completion to its planned date")
     }
 
     private static func testTodayOnlyPagination(in directory: URL) throws {

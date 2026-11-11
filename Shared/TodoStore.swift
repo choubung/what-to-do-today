@@ -72,12 +72,12 @@ final class TodoStore: @unchecked Sendable {
     private let lock = NSLock()
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let dayFilter = """
-        WHERE ?1 IS NULL OR completed_at IS NULL
+        WHERE ?1 IS NULL OR (completed_at IS NULL AND (planned_day IS NULL OR planned_day <= ?3))
             OR (completed_at >= ?1 AND completed_at < ?2)
         """
     private var orderedColumns: String {
         """
-        SELECT id, title, created_at, completed_at, category_id FROM todos
+        SELECT id, title, created_at, completed_at, category_id, planned_day FROM todos
         \(dayFilter)
         ORDER BY completed_at IS NOT NULL ASC,
                  COALESCE(completed_at, created_at) DESC, id ASC
@@ -129,16 +129,23 @@ final class TodoStore: @unchecked Sendable {
         return try readTasks(sql: orderedColumns)
     }
 
-    func fetchSnapshot(dayRange: DateInterval? = nil) throws -> TodoSnapshot {
+    func fetchSnapshot(dayRange: DateInterval? = nil, includeUpcoming: Bool = false) throws -> TodoSnapshot {
         lock.lock()
         defer { lock.unlock() }
         return try withTransaction(readOnly: true) {
-            TodoSnapshot(
+            let upcomingTasks: [TodoItem]
+            if includeUpcoming, let dayRange {
+                upcomingTasks = try readUpcomingTasks(after: dayRange.start)
+            } else {
+                upcomingTasks = []
+            }
+            return TodoSnapshot(
                 tasks: try readTasks(sql: orderedColumns, dayRange: dayRange),
                 stickyNotes: try readStickyNotes(dayRange: dayRange),
                 stickyNoteDefaultFontSize: try readDefaultStickyFontSize(),
                 categories: try readCategories(),
-                reminders: try readReminders(dayRange: dayRange)
+                reminders: try readReminders(dayRange: includeUpcoming ? nil : dayRange),
+                upcomingTasks: upcomingTasks
             )
         }
     }
@@ -155,7 +162,7 @@ final class TodoStore: @unchecked Sendable {
             let pageCount = max(1, (count - 1) / pageSize + 1)
             let clampedIndex = min(max(0, index), pageCount - 1)
             let tasks = try readTasks(
-                sql: orderedColumns + " LIMIT ?3 OFFSET ?4",
+                sql: orderedColumns + " LIMIT ?4 OFFSET ?5",
                 dayRange: dayRange,
                 pageSize: pageSize,
                 offset: clampedIndex * pageSize
@@ -172,7 +179,7 @@ final class TodoStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let statement = try prepare("""
-            SELECT id, title, created_at, completed_at, category_id FROM todos
+            SELECT id, title, created_at, completed_at, category_id, planned_day FROM todos
             WHERE completed_at >= ?1 AND completed_at < ?2
                 AND (?3 IS NULL OR category_id = ?3)
             ORDER BY completed_at DESC, id ASC
@@ -184,14 +191,14 @@ final class TodoStore: @unchecked Sendable {
     }
 
     @discardableResult
-    func addTask(title: String, categoryID: UUID? = nil, showAsStickyNote: Bool = false) throws -> TodoItem {
+    func addTask(title: String, categoryID: UUID? = nil, showAsStickyNote: Bool = false, plannedDay: Int? = nil) throws -> TodoItem {
         let title = try validatedTitle(title)
         lock.lock()
         defer { lock.unlock() }
 
         return try withTransaction(readOnly: false) {
             let categoryID = try resolvedCategoryID(categoryID)
-            return try insertTask(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote)
+            return try insertTask(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote, plannedDay: plannedDay)
         }
     }
 
@@ -214,17 +221,18 @@ final class TodoStore: @unchecked Sendable {
         }
     }
 
-    private func insertTask(title: String, categoryID: UUID, showAsStickyNote: Bool) throws -> TodoItem {
-        let task = TodoItem(id: UUID(), title: title, createdAt: Date(), completedAt: nil, categoryID: categoryID)
-        let statement = try prepare("INSERT INTO todos (id, title, created_at, category_id) VALUES (?, ?, ?, ?)")
+    private func insertTask(title: String, categoryID: UUID, showAsStickyNote: Bool, plannedDay: Int? = nil) throws -> TodoItem {
+        let task = TodoItem(id: UUID(), title: title, createdAt: Date(), completedAt: nil, categoryID: categoryID, plannedDay: plannedDay)
+        let statement = try prepare("INSERT INTO todos (id, title, created_at, category_id, planned_day) VALUES (?, ?, ?, ?, ?)")
         defer { sqlite3_finalize(statement) }
         try bind(task.id.uuidString, to: statement, at: 1)
         try bind(task.title, to: statement, at: 2)
         try check(sqlite3_bind_double(statement, 3, task.createdAt.timeIntervalSince1970))
         try bindCategoryID(categoryID, to: statement, at: 4)
+        try bindPlannedDay(plannedDay, to: statement, at: 5)
         try finishWrite(statement)
 
-        if showAsStickyNote {
+        if showAsStickyNote, (plannedDay ?? 0) <= TodoPlannedDay.key(for: Date()) {
             let note = try prepare("INSERT INTO sticky_notes (todo_id, is_visible) VALUES (?, 1)")
             defer { sqlite3_finalize(note) }
             try bind(task.id.uuidString, to: note, at: 1)
@@ -247,16 +255,26 @@ final class TodoStore: @unchecked Sendable {
 
     /// Updates both fields atomically; the title-only overload preserves the existing category.
     func updateTask(id: UUID, title: String, categoryID: UUID?) throws {
+        try updateTask(id: id, title: title, categoryID: categoryID, plannedDay: nil, updatePlan: false)
+    }
+
+    func updateTask(id: UUID, title: String, categoryID: UUID?, plannedDay: Int?) throws {
+        try updateTask(id: id, title: title, categoryID: categoryID, plannedDay: plannedDay, updatePlan: true)
+    }
+
+    private func updateTask(id: UUID, title: String, categoryID: UUID?, plannedDay: Int?, updatePlan: Bool) throws {
         let title = try validatedTitle(title)
         lock.lock()
         defer { lock.unlock() }
         try withTransaction(readOnly: false) {
             let categoryID = try resolvedCategoryID(categoryID)
-            let statement = try prepare("UPDATE todos SET title = ?, category_id = ? WHERE id = ?")
+            let statement = try prepare("UPDATE todos SET title = ?1, category_id = ?2, planned_day = CASE WHEN ?4 THEN ?5 ELSE planned_day END WHERE id = ?3")
             defer { sqlite3_finalize(statement) }
             try bind(title, to: statement, at: 1)
             try bindCategoryID(categoryID, to: statement, at: 2)
             try bind(id.uuidString, to: statement, at: 3)
+            try check(sqlite3_bind_int(statement, 4, updatePlan ? 1 : 0))
+            try bindPlannedDay(plannedDay, to: statement, at: 5)
             try finishWrite(statement, requiresExistingTask: true)
         }
     }
@@ -604,7 +622,7 @@ final class TodoStore: @unchecked Sendable {
             ORDER BY todo_id
             """)
         defer { sqlite3_finalize(statement) }
-        try bindDayRange(dayRange, to: statement)
+        try bindListDayRange(dayRange, to: statement)
         var reminders: [TodoReminder] = []
         var result = sqlite3_step(statement)
         while result == SQLITE_ROW {
@@ -723,6 +741,9 @@ final class TodoStore: @unchecked Sendable {
             }
             if try !tableColumns("todos").contains("category_id") {
                 try execute("ALTER TABLE todos ADD COLUMN category_id TEXT REFERENCES categories(id) ON DELETE SET NULL")
+            }
+            if try !tableColumns("todos").contains("planned_day") {
+                try execute("ALTER TABLE todos ADD COLUMN planned_day INTEGER")
             }
             try execute("CREATE INDEX IF NOT EXISTS todos_category ON todos(category_id)")
             try execute("CREATE INDEX IF NOT EXISTS todos_completion_date ON todos(completed_at DESC, id ASC)")
@@ -847,7 +868,7 @@ final class TodoStore: @unchecked Sendable {
             ORDER BY todo_id
             """)
         defer { sqlite3_finalize(statement) }
-        try bindDayRange(dayRange, to: statement)
+        try bindListDayRange(dayRange, to: statement)
         var notes: [StickyNoteState] = []
         var result = sqlite3_step(statement)
         while result == SQLITE_ROW {
@@ -1060,10 +1081,21 @@ final class TodoStore: @unchecked Sendable {
         }
     }
 
+    private func readUpcomingTasks(after date: Date) throws -> [TodoItem] {
+        let statement = try prepare("""
+            SELECT id, title, created_at, completed_at, category_id, planned_day FROM todos
+            WHERE completed_at IS NULL AND planned_day > ?1
+            ORDER BY planned_day ASC, created_at DESC, id ASC
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bindPlannedDay(TodoPlannedDay.key(for: date), to: statement, at: 1)
+        return try readTaskRows(statement)
+    }
+
     private func taskCount(dayRange: DateInterval?) throws -> Int {
         let statement = try prepare("SELECT COUNT(*) FROM todos \(dayFilter)")
         defer { sqlite3_finalize(statement) }
-        try bindDayRange(dayRange, to: statement)
+        try bindListDayRange(dayRange, to: statement)
         guard sqlite3_step(statement) == SQLITE_ROW else { throw databaseError() }
         return Int(sqlite3_column_int64(statement, 0))
     }
@@ -1071,10 +1103,10 @@ final class TodoStore: @unchecked Sendable {
     private func readTasks(sql: String, dayRange: DateInterval? = nil, pageSize: Int? = nil, offset: Int = 0) throws -> [TodoItem] {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
-        try bindDayRange(dayRange, to: statement)
+        try bindListDayRange(dayRange, to: statement)
         if let pageSize {
-            try check(sqlite3_bind_int64(statement, 3, Int64(pageSize)))
-            try check(sqlite3_bind_int64(statement, 4, Int64(offset)))
+            try check(sqlite3_bind_int64(statement, 4, Int64(pageSize)))
+            try check(sqlite3_bind_int64(statement, 5, Int64(offset)))
         }
         return try readTaskRows(statement)
     }
@@ -1096,7 +1128,8 @@ final class TodoStore: @unchecked Sendable {
                 title: stringColumn(statement, index: 1),
                 createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
                 completedAt: completedAt,
-                categoryID: categoryID
+                categoryID: categoryID,
+                plannedDay: sqlite3_column_type(statement, 5) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 5))
             ))
             result = sqlite3_step(statement)
         }
@@ -1122,6 +1155,19 @@ final class TodoStore: @unchecked Sendable {
             sqlite3_bind_text64(statement, index, bytes, UInt64(value.utf8.count), transient, UInt8(SQLITE_UTF8))
         }
         try check(result)
+    }
+
+    private func bindPlannedDay(_ day: Int?, to statement: OpaquePointer, at index: Int32) throws {
+        if let day {
+            try check(sqlite3_bind_int64(statement, index, Int64(day)))
+        } else {
+            try check(sqlite3_bind_null(statement, index))
+        }
+    }
+
+    private func bindListDayRange(_ range: DateInterval?, to statement: OpaquePointer) throws {
+        try bindDayRange(range, to: statement)
+        try bindPlannedDay(range.map { TodoPlannedDay.key(for: $0.start) }, to: statement, at: 3)
     }
 
     private func bindDayRange(_ dayRange: DateInterval?, to statement: OpaquePointer) throws {

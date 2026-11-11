@@ -15,7 +15,7 @@ App Group 권한으로 서명된 앱을 설치한 뒤, 같은 Mac의 로컬 MCP 
 
 | 할 수 있는 일 | 채팅에서 요청하는 예 | MCP 도구 |
 | --- | --- | --- |
-| 미완료 목록과 설정된 알림 조회 | “오늘 할 일과 알림을 보여줘.” | `list_open_tasks` |
+| 오늘 목록의 미완료 항목과 설정된 알림 조회 | “오늘 할 일과 알림을 보여줘.” | `list_open_tasks` |
 | 오늘 또는 지정 날짜의 완료 기록 조회 | “어제 끝낸 일 알려줘.” | `list_completed_today`, `list_completed_on` |
 | 할 일 추가·제목 수정·삭제 | “‘회의 자료 정리’를 업무에 추가해 줘.” | `add_task`, `update_task`, `delete_task` |
 | 완료 또는 완료 취소 | “‘회의 자료 정리’ 완료 처리해 줘.” | `set_task_completed` |
