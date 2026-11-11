@@ -3,6 +3,16 @@ import Foundation
 struct TodoCategory: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
+    let isDefault: Bool
+    /// Includes completed tasks outside today's list, so deletion previews remain accurate.
+    let taskCount: Int
+
+    init(id: UUID, name: String, isDefault: Bool = false, taskCount: Int = 0) {
+        self.id = id
+        self.name = name
+        self.isDefault = isDefault
+        self.taskCount = taskCount
+    }
 
     static let maximumNameLength = 30
 }

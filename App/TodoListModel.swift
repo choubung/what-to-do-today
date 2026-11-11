@@ -34,16 +34,16 @@ private actor TodoRepository {
         try connection().setCategory(id: id, categoryID: categoryID)
     }
 
-    func createCategory(name: String) throws {
-        try connection().createCategory(name: name)
+    func createCategory(name: String) throws -> UUID {
+        try connection().createCategory(name: name).id
     }
 
     func renameCategory(id: UUID, name: String) throws {
         try connection().renameCategory(id: id, name: name)
     }
 
-    func deleteCategory(id: UUID) throws {
-        try connection().deleteCategory(id: id)
+    func deleteCategory(id: UUID, movingTasksTo destinationID: UUID?) throws {
+        try connection().deleteCategory(id: id, movingTasksTo: destinationID)
     }
 
     func setReminder(id: UUID, localTime: ReminderLocalTime) throws {
@@ -133,6 +133,7 @@ final class TodoListModel: ObservableObject {
 
     var tasks: [TodoItem] { snapshot.tasks }
     var categories: [TodoCategory] { snapshot.categories }
+    var defaultCategoryID: UUID? { categories.first(where: \.isDefault)?.id }
     var stickyNotes: [StickyNoteState] { snapshot.stickyNotes }
     var incompleteTasks: [TodoItem] { tasks.filter { !$0.isCompleted } }
     var completedTasks: [TodoItem] { tasks.filter(\.isCompleted) }
@@ -217,15 +218,23 @@ final class TodoListModel: ObservableObject {
     }
 
     func createCategory(name: String) async -> Bool {
-        await save { try await self.repository.createCategory(name: name) }
+        await createCategoryReturningID(name: name) != nil
+    }
+
+    func createCategoryReturningID(name: String) async -> UUID? {
+        var createdID: UUID?
+        let succeeded = await save {
+            createdID = try await self.repository.createCategory(name: name)
+        }
+        return succeeded ? createdID : nil
     }
 
     func renameCategory(id: UUID, name: String) async -> Bool {
         await save { try await self.repository.renameCategory(id: id, name: name) }
     }
 
-    func deleteCategory(id: UUID) async -> Bool {
-        await save { try await self.repository.deleteCategory(id: id) }
+    func deleteCategory(id: UUID, movingTasksTo destinationID: UUID? = nil) async -> Bool {
+        await save { try await self.repository.deleteCategory(id: id, movingTasksTo: destinationID) }
     }
 
     func reminder(for id: UUID) -> TodoReminder? {
@@ -411,7 +420,7 @@ final class TodoListModel: ObservableObject {
 
     private func present(_ error: Error) {
         switch error as? TodoStoreError {
-        case .invalidReminder?, .completedTaskReminder?, .emptyTitle?, .missingTask?, .invalidCategoryName?, .duplicateCategoryName?, .missingCategory?:
+        case .invalidReminder?, .completedTaskReminder?, .emptyTitle?, .missingTask?, .invalidCategoryName?, .duplicateCategoryName?, .missingCategory?, .lastCategory?, .invalidCategoryDestination?:
             errorMessage = error.localizedDescription
         case .unavailableAppGroup?:
             errorMessage = "할 일 저장 공간에 접근할 수 없어요."

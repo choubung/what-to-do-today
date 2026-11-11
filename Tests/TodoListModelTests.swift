@@ -16,6 +16,9 @@ private enum TodoListModelTests {
         let model = TodoListModel(store: store, broadcastsChanges: false)
         await model.refresh()
         await model.refresh()
+        let initialDefaultID = model.defaultCategoryID!
+        precondition(model.categories.count == 1 && model.categories[0].isDefault)
+        precondition(model.tasks.allSatisfy { $0.categoryID == initialDefaultID })
 
         var publications = 0
         let subscription = model.$snapshot.sink { _ in publications += 1 }
@@ -119,11 +122,27 @@ private enum TodoListModelTests {
         precondition(renamed && model.categoryName(for: categorizedTask) == "일")
         let duplicateCategory = await model.createCategory(name: "일")
         precondition(!duplicateCategory && model.errorMessage == TodoStoreError.duplicateCategoryName.localizedDescription)
-        let removedCategory = await model.deleteCategory(id: category.id)
-        precondition(removedCategory && model.categories.isEmpty && model.errorMessage == nil)
-        precondition(model.tasks.first { $0.id == first.id }?.categoryID == nil)
+        let removedCategory = await model.deleteCategory(id: category.id, movingTasksTo: initialDefaultID)
+        precondition(removedCategory && model.categories.count == 1 && model.errorMessage == nil)
+        precondition(model.tasks.first { $0.id == first.id }?.categoryID == initialDefaultID)
         let staleAssignment = await model.setCategory(id: first.id, categoryID: category.id)
         precondition(!staleAssignment && model.errorMessage == TodoStoreError.missingCategory.localizedDescription)
+
+        // The default is an identity, not a name; deleting it transfers its role and all tasks.
+        let renamedDefault = await model.renameCategory(id: initialDefaultID, name: "생활")
+        precondition(renamedDefault && model.defaultCategoryID == initialDefaultID)
+        let destinationID = await model.createCategoryReturningID(name: "새 기본")
+        precondition(destinationID != nil && model.categories.contains { $0.id == destinationID })
+        let duplicateID = await model.createCategoryReturningID(name: "새 기본")
+        precondition(duplicateID == nil)
+        let replacedDefault = await model.deleteCategory(id: initialDefaultID, movingTasksTo: destinationID)
+        precondition(replacedDefault && model.defaultCategoryID == destinationID)
+        precondition(model.tasks.allSatisfy { $0.categoryID == destinationID })
+        let quickAdded = await model.add(title: "default quick add")
+        precondition(quickAdded && model.tasks.first { $0.title == "default quick add" }?.categoryID == destinationID)
+        let lastDeletion = await model.deleteCategory(id: destinationID!)
+        precondition(!lastDeletion && model.errorMessage == TodoStoreError.lastCategory.localizedDescription)
+        precondition(model.categories.count == 1 && model.defaultCategoryID == destinationID)
 
         let reminderTime = ReminderLocalTime(year: 2030, month: 5, day: 12, hour: 9, minute: 30)!
         let scheduled = await model.setReminder(id: first.id, localTime: reminderTime)
