@@ -11,6 +11,11 @@ xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
 "$build_dir/store-tests"
 
 xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
+  Shared/*.swift App/TodoMCPServer.swift App/TodoMCPTool.swift Tests/TodoMCPServerTests.swift \
+  -o "$build_dir/mcp-tests"
+"$build_dir/mcp-tests"
+
+xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
   Shared/TodoItem.swift Shared/StickyNoteState.swift Shared/TodoReminder.swift \
   App/StickyNoteLayout.swift Tests/StickyNoteLayoutTests.swift \
   -o "$build_dir/layout-tests"

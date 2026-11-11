@@ -5,6 +5,26 @@
 	};
 	"objectVersion" = 56;
 	"objects" = {
+		"82E05A62178B4CDCA755FC61" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "App/TodoMCPServer.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"82E05A62178B4CDCA755FC62" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "82E05A62178B4CDCA755FC61";
+		};
+		"82E05A62178B4CDCA755FC63" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "App/TodoMCPTool.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"82E05A62178B4CDCA755FC64" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "82E05A62178B4CDCA755FC63";
+		};
 		"C81C62CE5AD846769BCDE001" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -191,6 +211,8 @@
 				"89FBB49C269DD96D95C7BE81",
 				"B49A1F7F23162CC4CD1C1022",
 				"FD52AB7CD648A21D9F37D67C",
+				"82E05A62178B4CDCA755FC61",
+				"82E05A62178B4CDCA755FC63",
 				"090B157313F476AF110D37E6",
 				"7457B5880437C09960B360CD",
 				"624A8F936E0903B5DF7F6FC4",
@@ -418,8 +440,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.2.3";
-				"CURRENT_PROJECT_VERSION" = "8";
+				"MARKETING_VERSION" = "1.2.4";
+				"CURRENT_PROJECT_VERSION" = "9";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "TodoWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
@@ -450,8 +472,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.2.3";
-				"CURRENT_PROJECT_VERSION" = "8";
+				"MARKETING_VERSION" = "1.2.4";
+				"CURRENT_PROJECT_VERSION" = "9";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "TodoWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
@@ -566,6 +588,8 @@
 				"B1E7BA0E1FEFE98C4A365831",
 				"94BFE9895F9A66A36E5F88A2",
 				"D3145F8AB4637D0358F10C80",
+				"82E05A62178B4CDCA755FC62",
+				"82E05A62178B4CDCA755FC64",
 				"7A802831DE2724D698901D25",
 				"B81E264940B7228228CB3B53",
 			);
@@ -597,8 +621,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.2.3";
-				"CURRENT_PROJECT_VERSION" = "8";
+				"MARKETING_VERSION" = "1.2.4";
+				"CURRENT_PROJECT_VERSION" = "9";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "What to Do Today";
 				"PRODUCT_MODULE_NAME" = "WhatToDoToday";
@@ -627,8 +651,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.2.3";
-				"CURRENT_PROJECT_VERSION" = "8";
+				"MARKETING_VERSION" = "1.2.4";
+				"CURRENT_PROJECT_VERSION" = "9";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "What to Do Today";
 				"PRODUCT_MODULE_NAME" = "WhatToDoToday";
