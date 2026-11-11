@@ -128,8 +128,70 @@ private enum TaskStoreTests {
         try testDayFiltering(in: directory)
         try testStickySizePersistence(in: directory)
         try testStickyFontPersistence(in: directory)
+        try testStickyColorPersistence(in: directory)
         try testCategories(in: directory)
         print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, concurrency, and sticky-note migration/state tests.")
+    }
+
+    private static func testStickyColorPersistence(in directory: URL) throws {
+        let url = directory.appendingPathComponent("legacy-p1-colors.sqlite")
+        let id = UUID()
+        try executeLegacySQL("""
+            CREATE TABLE todos (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL,
+                created_at REAL NOT NULL, completed_at REAL
+            );
+            CREATE TABLE sticky_notes (
+                todo_id TEXT PRIMARY KEY NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+                is_visible INTEGER NOT NULL DEFAULT 0,
+                is_always_on_top INTEGER NOT NULL DEFAULT 0,
+                position_x REAL, position_y REAL, display_id TEXT,
+                width REAL, height REAL, font_size REAL
+            );
+            INSERT INTO todos VALUES ('\(id.uuidString)', '기존 포스트잇', 100, NULL);
+            INSERT INTO sticky_notes VALUES ('\(id.uuidString)', 1, 1, 40, 80, 'display', 300, 220, 20);
+            """, at: url)
+        let store = try TodoStore(databaseURL: url)
+        let migrated = try store.fetchSnapshot().stickyNotes.first!
+        try expect(migrated.colorHex == nil && migrated.isVisible && migrated.isAlwaysOnTop,
+                   "Legacy notes must retain their visibility and use the existing default color")
+        try expect(migrated.fontSize == 20 && migrated.size == StickyNoteSize(width: 300, height: 220),
+                   "Color migration must preserve note typography and geometry")
+        try store.saveStickyColor(id: id, colorHex: "  #aBcD09  ")
+        let reopened = try TodoStore(databaseURL: url)
+        try expect(try reopened.fetchSnapshot().stickyNotes.first?.colorHex == "#ABCD09",
+                   "Another connection and a reopened store must read the canonical selected color")
+
+        for invalid in ["", "#FFF", "#00000000", "#GGHHII", "+12345", "#１２３４５６", "AABBCC\0"] {
+            try expect(StickyNoteColor(hex: invalid) == nil, "Malformed RGB hex must not be parsed")
+            do {
+                try store.saveStickyColor(id: id, colorHex: invalid)
+                throw TestFailure(description: "Invalid note color accepted")
+            } catch TodoStoreError.invalidColor {}
+        }
+        try expect(try reopened.fetchSnapshot().stickyNotes.first?.colorHex == "#ABCD09",
+                   "An invalid color must not change the last saved color")
+
+        for hex in ["#000000", "#FFFFFF", "#777777", "#0000FF", "#FF0000", "#00FF00", "#123456", "#FFF7D4"] {
+            let color = StickyNoteColor(hex: hex)!
+            let ratio = color.usesDarkText ? (color.luminance + 0.05) / 0.05 : 1.05 / (color.luminance + 0.05)
+            try expect(ratio >= 4.5, "Chosen black/white text must remain legible on custom colors")
+        }
+        try expect(StickyNoteColor(hex: "ffffff")?.usesDarkText == true, "Light notes need dark text")
+        try expect(StickyNoteColor(hex: "000000")?.usesDarkText == false, "Dark notes need light text")
+
+        try store.saveStickyColor(id: id, colorHex: nil)
+        try expect(try reopened.fetchSnapshot().stickyNotes.first?.colorHex == nil,
+                   "Resetting color must restore the dynamic default appearance")
+        try store.setCompleted(id: id, completed: true)
+        try store.saveStickyColor(id: id, colorHex: "123456")
+        let completed = try reopened.fetchSnapshot().stickyNotes.first!
+        try expect(completed.colorHex == "#123456" && !completed.isVisible,
+                   "A delayed color save must not reopen a completed note")
+        try store.deleteTask(id: id)
+        try store.saveStickyColor(id: id, colorHex: "#ABCDEF")
+        try expect(try reopened.fetchSnapshot().stickyNotes.isEmpty,
+                   "A delayed color save must not recreate a deleted note")
     }
 
     private static func testCategories(in directory: URL) throws {

@@ -262,7 +262,7 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
         panel.standardWindowButton(.closeButton)?.isHidden = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
-        panel.backgroundColor = StickyNoteAppearance.background
+        panel.backgroundColor = StickyNoteAppearance.background(for: note.colorHex)
         panel.minSize = StickyNoteLayout.minimumSize
         panel.tabbingMode = .disallowed
         panel.isMovableByWindowBackground = false
@@ -277,10 +277,12 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
         let contentChanged = self.task != task
             || self.note.isAlwaysOnTop != note.isAlwaysOnTop
             || self.note.fontSize != note.fontSize
+            || self.note.colorHex != note.colorHex
         let behaviorChanged = hostingView == nil || self.note.isAlwaysOnTop != note.isAlwaysOnTop
         self.task = task
         self.note = note
         guard let panel = window as? NSPanel else { return }
+        panel.backgroundColor = StickyNoteAppearance.background(for: note.colorHex)
         if panel.title != task.title {
             panel.title = task.title
             if isRegisteredInWindowMenu {

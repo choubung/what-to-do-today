@@ -12,6 +12,7 @@ enum TodoStoreError: LocalizedError {
     case invalidPosition
     case invalidSize
     case invalidFontSize
+    case invalidColor
     case invalidRecord
     case database(String)
 
@@ -37,6 +38,8 @@ enum TodoStoreError: LocalizedError {
             return "포스트잇 크기를 저장할 수 없어요."
         case .invalidFontSize:
             return "포스트잇 글자 크기를 저장할 수 없어요."
+        case .invalidColor:
+            return "포스트잇 색상이 올바르지 않아요. 다시 선택해 주세요."
         case .invalidRecord:
             return "저장된 할 일 정보를 읽을 수 없어요."
         case .database(let message):
@@ -380,12 +383,39 @@ final class TodoStore: @unchecked Sendable {
         try finishWrite(statement)
     }
 
+    func saveStickyColor(id: UUID, colorHex: String?) throws {
+        let normalized: String?
+        if let colorHex {
+            guard let color = StickyNoteColor(hex: colorHex) else { throw TodoStoreError.invalidColor }
+            normalized = color.hex
+        } else {
+            normalized = nil
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        let statement = try prepare("UPDATE sticky_notes SET color_hex = ? WHERE todo_id = ?")
+        defer { sqlite3_finalize(statement) }
+        if let normalized {
+            try bind(normalized, to: statement, at: 1)
+        } else {
+            try check(sqlite3_bind_null(statement, 1))
+        }
+        try bind(id.uuidString, to: statement, at: 2)
+        // A late appearance save must never recreate a deleted note or show a hidden one.
+        try finishWrite(statement)
+    }
+
     private func configureSchema() throws {
         try withTransaction(readOnly: false) {
             let fontSizeColumn = """
                 font_size REAL
                     CHECK (font_size >= \(StickyNoteTypography.minimumFontSize)
                         AND font_size <= \(StickyNoteTypography.maximumFontSize))
+                """
+            let colorColumn = """
+                color_hex TEXT CHECK (color_hex IS NULL OR
+                    (length(color_hex) = 7 AND substr(color_hex, 1, 1) = '#'
+                     AND substr(color_hex, 2) NOT GLOB '*[^0-9A-F]*'))
                 """
             try execute("""
                 CREATE TABLE IF NOT EXISTS categories (
@@ -413,6 +443,7 @@ final class TodoStore: @unchecked Sendable {
                     width REAL CHECK (width > 0),
                     height REAL CHECK (height > 0),
                     \(fontSizeColumn),
+                    \(colorColumn),
                     CHECK ((position_x IS NULL AND position_y IS NULL)
                         OR (position_x IS NOT NULL AND position_y IS NOT NULL))
                 );
@@ -433,6 +464,9 @@ final class TodoStore: @unchecked Sendable {
             }
             if !columns.contains("font_size") {
                 try execute("ALTER TABLE sticky_notes ADD COLUMN \(fontSizeColumn)")
+            }
+            if !columns.contains("color_hex") {
+                try execute("ALTER TABLE sticky_notes ADD COLUMN \(colorColumn)")
             }
             if try !tableColumns("todos").contains("category_id") {
                 try execute("ALTER TABLE todos ADD COLUMN category_id TEXT REFERENCES categories(id) ON DELETE SET NULL")
@@ -474,7 +508,7 @@ final class TodoStore: @unchecked Sendable {
 
     private func readStickyNotes(dayRange: DateInterval?) throws -> [StickyNoteState] {
         let statement = try prepare("""
-            SELECT todo_id, is_visible, is_always_on_top, position_x, position_y, display_id, width, height, font_size
+            SELECT todo_id, is_visible, is_always_on_top, position_x, position_y, display_id, width, height, font_size, color_hex
             FROM sticky_notes JOIN todos ON todos.id = sticky_notes.todo_id
             \(dayFilter)
             ORDER BY todo_id
@@ -519,13 +553,22 @@ final class TodoStore: @unchecked Sendable {
                 }
                 fontSize = savedFontSize
             }
+            var colorHex: String?
+            if sqlite3_column_type(statement, 9) != SQLITE_NULL {
+                let savedColor = stringColumn(statement, index: 9)
+                guard let color = StickyNoteColor(hex: savedColor), color.hex == savedColor else {
+                    throw TodoStoreError.invalidRecord
+                }
+                colorHex = color.hex
+            }
             notes.append(StickyNoteState(
                 id: id,
                 isVisible: sqlite3_column_int(statement, 1) != 0,
                 isAlwaysOnTop: sqlite3_column_int(statement, 2) != 0,
                 position: position,
                 size: size,
-                fontSize: fontSize
+                fontSize: fontSize,
+                colorHex: colorHex
             ))
             result = sqlite3_step(statement)
         }

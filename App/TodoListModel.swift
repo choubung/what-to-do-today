@@ -85,6 +85,10 @@ private actor TodoRepository {
     func saveDefaultStickyFontSize(_ fontSize: Double) throws {
         try connection().saveDefaultStickyFontSize(fontSize)
     }
+
+    func saveStickyColor(id: UUID, colorHex: String?) throws {
+        try connection().saveStickyColor(id: id, colorHex: colorHex)
+    }
 }
 
 @MainActor
@@ -106,6 +110,7 @@ final class TodoListModel: ObservableObject {
     private static let positionErrorMessage = "포스트잇 위치를 저장하지 못했어요. 다시 이동해 주세요."
     private static let sizeErrorMessage = "포스트잇 크기를 저장하지 못했어요. 다시 조정해 주세요."
     private static let fontErrorMessage = "글자 크기를 저장하지 못했어요. 다시 조정해 주세요."
+    private static let colorErrorMessage = "포스트잇 색상을 저장하지 못했어요. 다시 선택해 주세요."
 
     var onShowStickyNotes: (([UUID]) -> Void)?
 
@@ -284,18 +289,24 @@ final class TodoListModel: ObservableObject {
     }
 
     func setStickyFontSize(id: UUID, fontSize: Double?) async {
-        await saveStickyAppearance {
+        _ = await saveStickyAppearance(failureMessage: Self.fontErrorMessage) {
             try await self.repository.saveStickyFontSize(id: id, fontSize: fontSize)
         }
     }
 
     func setDefaultStickyFontSize(_ fontSize: Double) async {
-        await saveStickyAppearance {
+        _ = await saveStickyAppearance(failureMessage: Self.fontErrorMessage) {
             try await self.repository.saveDefaultStickyFontSize(fontSize)
         }
     }
 
-    private func saveStickyAppearance(_ operation: () async throws -> Void) async {
+    func setStickyColor(id: UUID, colorHex: String?) async -> Bool {
+        await saveStickyAppearance(failureMessage: Self.colorErrorMessage) {
+            try await self.repository.saveStickyColor(id: id, colorHex: colorHex)
+        }
+    }
+
+    private func saveStickyAppearance(failureMessage: String, _ operation: () async throws -> Void) async -> Bool {
         pendingPreferenceSaves += 1
         defer {
             pendingPreferenceSaves -= 1
@@ -303,11 +314,13 @@ final class TodoListModel: ObservableObject {
         }
         do {
             try await operation()
-            if errorMessage == Self.fontErrorMessage { errorMessage = nil }
+            if errorMessage == failureMessage { errorMessage = nil }
             notifyChange(reloadWidgets: false)
             await refresh()
+            return true
         } catch {
-            errorMessage = Self.fontErrorMessage
+            errorMessage = failureMessage
+            return false
         }
     }
 

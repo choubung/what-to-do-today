@@ -5,6 +5,20 @@
 	};
 	"objectVersion" = 56;
 	"objects" = {
+		"12558FB3E82CB58263FE877F" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Shared/StickyNoteColor.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"D6915AEE62FCE98D5E9F5C26" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "12558FB3E82CB58263FE877F";
+		};
+		"B642A4ED636631F946BEE89F" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "12558FB3E82CB58263FE877F";
+		};
 		"D4762988CB514F8DAB91DEB7" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "image.icns";
@@ -143,6 +157,7 @@
 		"44C7E229889FE9D1BB841A79" = {
 			"isa" = "PBXGroup";
 			"children" = (
+				"12558FB3E82CB58263FE877F",
 				"44D14998D1DA7D5C61F83C53",
 				"32245F28D0E9559254A6C642",
 				"5CFC394B37130138D6B50CFD",
@@ -308,6 +323,7 @@
 			"isa" = "PBXSourcesBuildPhase";
 			"buildActionMask" = 2147483647;
 			"files" = (
+				"B642A4ED636631F946BEE89F",
 				"12D2F58D898400D5866B8C60",
 				"DC3DED4AB201E36616F724E5",
 				"785A4355570D55AEA38BF9E7",
@@ -476,6 +492,7 @@
 			"isa" = "PBXSourcesBuildPhase";
 			"buildActionMask" = 2147483647;
 			"files" = (
+				"D6915AEE62FCE98D5E9F5C26",
 				"0F3C25E273934A7480F5BACE",
 				"43764C136629B89347814C0E",
 				"6B4B9F500B2FB874F8B4B7CB",
