@@ -3,6 +3,7 @@ import SwiftUI
 struct TodoListView: View {
     @ObservedObject var model: TodoListModel
     @State private var newTitle = ""
+    @State private var showNewTaskAsStickyNote = false
     @State private var editingTask: TodoItem?
     @State private var deletingTask: TodoItem?
     @State private var showingStickyPicker = false
@@ -29,6 +30,14 @@ struct TodoListView: View {
                 .accessibilityLabel("할 일 추가")
             }
             .padding(16)
+
+            Toggle("포스트잇으로 띄우기", isOn: $showNewTaskAsStickyNote)
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
+                .disabled(model.isSaving)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
 
             HStack {
                 Button("포스트잇 띄우기", systemImage: "note") {
@@ -173,8 +182,12 @@ struct TodoListView: View {
     private func addTask() {
         guard !newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let title = newTitle
+        let showAsStickyNote = showNewTaskAsStickyNote
         Task {
-            if await model.add(title: title) { newTitle = "" }
+            if await model.add(title: title, showAsStickyNote: showAsStickyNote) {
+                newTitle = ""
+                showNewTaskAsStickyNote = false
+            }
             isEntryFocused = true
         }
     }
@@ -321,6 +334,7 @@ struct QuickAddView: View {
     @ObservedObject var model: TodoListModel
     let onSave: () -> Void
     @State private var title = ""
+    @State private var showAsStickyNote = false
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -334,6 +348,10 @@ struct QuickAddView: View {
                 Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
             }
             HStack {
+                Toggle("포스트잇으로 띄우기", isOn: $showAsStickyNote)
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .disabled(model.isSaving)
                 Spacer()
                 Button("추가", action: save)
                     .keyboardShortcut(.defaultAction)
@@ -347,9 +365,12 @@ struct QuickAddView: View {
 
     private func save() {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let submittedTitle = title
+        let submittedStickyChoice = showAsStickyNote
         Task {
-            if await model.add(title: title) {
+            if await model.add(title: submittedTitle, showAsStickyNote: submittedStickyChoice) {
                 title = ""
+                showAsStickyNote = false
                 onSave()
             }
         }
