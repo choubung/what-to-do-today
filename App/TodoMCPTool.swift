@@ -51,7 +51,7 @@ enum TodoMCPTool: String, CaseIterable {
 
     private var specification: (description: String, required: [Parameter], optional: [Parameter]) {
         switch self {
-        case .listOpen: ("List all unfinished tasks, their reminders, and empty categories in app category order.", [], [])
+        case .listOpen: ("List unfinished tasks in today's list, their reminders, and empty categories in app category order.", [], [])
         case .listCompletedToday: ("List tasks completed today on the Mac, grouped by category.", [], [])
         case .listCompletedOn: ("List tasks completed on a specific local date, grouped by category.", [.localDate], [])
         case .listCategories: ("List categories, their IDs, the default category, and task counts including history.", [], [])
