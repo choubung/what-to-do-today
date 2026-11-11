@@ -41,7 +41,7 @@ struct TodoReminderEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("할 일 알림").font(.headline)
-            if let task = model.tasks.first(where: { $0.id == taskID }) {
+            if let task = model.task(id: taskID) {
                 Text(task.title).lineLimit(3)
             }
             ReminderAccessPanel(coordinator: coordinator)

@@ -15,23 +15,23 @@ private actor TodoRepository {
     }
 
     func fetchSnapshot() throws -> TodoSnapshot {
-        try connection().fetchSnapshot(dayRange: Calendar.autoupdatingCurrent.dateInterval(of: .day, for: Date()))
+        try connection().fetchSnapshot(dayRange: Calendar.autoupdatingCurrent.dateInterval(of: .day, for: Date()), includeUpcoming: true)
     }
 
     func fetchCompletedTasks(in range: DateInterval, categoryID: UUID?) throws -> [TodoItem] {
         try connection().fetchCompletedTasks(in: range, categoryID: categoryID)
     }
 
-    func add(title: String, categoryID: UUID?, showAsStickyNote: Bool) throws {
-        try connection().addTask(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote)
+    func add(title: String, categoryID: UUID?, showAsStickyNote: Bool, plannedDay: Int?) throws {
+        try connection().addTask(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote, plannedDay: plannedDay)
     }
 
     func update(id: UUID, title: String) throws {
         try connection().updateTask(id: id, title: title)
     }
 
-    func update(id: UUID, title: String, categoryID: UUID?) throws {
-        try connection().updateTask(id: id, title: title, categoryID: categoryID)
+    func update(id: UUID, title: String, categoryID: UUID?, plannedDay: Int?) throws {
+        try connection().updateTask(id: id, title: title, categoryID: categoryID, plannedDay: plannedDay)
     }
 
     func setCategory(id: UUID, categoryID: UUID?) throws {
@@ -141,6 +141,11 @@ final class TodoListModel: ObservableObject {
     var onShowStickyNotes: (([UUID]) -> Void)?
 
     var tasks: [TodoItem] { snapshot.tasks }
+    var upcomingTasks: [TodoItem] { snapshot.upcomingTasks }
+
+    func task(id: UUID) -> TodoItem? {
+        tasks.first { $0.id == id } ?? upcomingTasks.first { $0.id == id }
+    }
     var categories: [TodoCategory] { snapshot.categories }
     var defaultCategoryID: UUID? { categories.first(where: \.isDefault)?.id }
     var stickyNotes: [StickyNoteState] { snapshot.stickyNotes }
@@ -214,9 +219,9 @@ final class TodoListModel: ObservableObject {
         try await repository.fetchCompletedTasks(in: range, categoryID: categoryID)
     }
 
-    func add(title: String, categoryID: UUID? = nil, showAsStickyNote: Bool = false) async -> Bool {
+    func add(title: String, categoryID: UUID? = nil, showAsStickyNote: Bool = false, plannedDay: Int? = nil) async -> Bool {
         await save {
-            try await self.repository.add(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote)
+            try await self.repository.add(title: title, categoryID: categoryID, showAsStickyNote: showAsStickyNote, plannedDay: plannedDay)
         }
     }
 
@@ -224,8 +229,8 @@ final class TodoListModel: ObservableObject {
         await save { try await self.repository.update(id: id, title: title) }
     }
 
-    func update(id: UUID, title: String, categoryID: UUID?) async -> Bool {
-        await save { try await self.repository.update(id: id, title: title, categoryID: categoryID) }
+    func update(id: UUID, title: String, categoryID: UUID?, plannedDay: Int?) async -> Bool {
+        await save { try await self.repository.update(id: id, title: title, categoryID: categoryID, plannedDay: plannedDay) }
     }
 
     func setCategory(id: UUID, categoryID: UUID?) async -> Bool {
