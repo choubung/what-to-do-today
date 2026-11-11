@@ -13,6 +13,7 @@ struct TodoListView: View {
     @State private var showingCategories = false
     @State private var showingNewCategory = false
     @State private var categoryMoveNotice: TodoCategory?
+    @State private var showingCompletionHistory = false
     @State private var showingReminderSettings = false
     @State private var reminderTask: TodoItem?
     @FocusState private var isEntryFocused: Bool
@@ -60,6 +61,10 @@ struct TodoListView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button { showingCompletionHistory = true } label: {
+                    Label("이전 완료", systemImage: "calendar")
+                }
+                .buttonStyle(.borderless).controlSize(.small).disabled(model.isLoading)
                 stickyManagementMenu
                 Button { showingReminderSettings = true } label: {
                     Image(systemName: "bell")
@@ -121,6 +126,9 @@ struct TodoListView: View {
         .sheet(isPresented: $showingNewCategory) {
             TodoCategoryNameEditor(model: model)
         }
+        .sheet(isPresented: $showingCompletionHistory) {
+            CompletionHistoryView(model: model, initialCategoryID: nil)
+        }
         .sheet(isPresented: $showingReminderSettings) {
             ReminderSettingsView(coordinator: reminders)
         }
@@ -140,7 +148,7 @@ struct TodoListView: View {
             Text(task.title)
         }
         .alert("처리하지 못했어요", isPresented: Binding(
-            get: { model.errorMessage != nil && addingCategory == nil && editingTask == nil && reminderTask == nil && !showingReminderSettings && !showingStickyPicker && !showingCategories && !showingNewCategory && controlActiveState == .key },
+            get: { model.errorMessage != nil && !showingCompletionHistory && addingCategory == nil && editingTask == nil && reminderTask == nil && !showingReminderSettings && !showingStickyPicker && !showingCategories && !showingNewCategory && controlActiveState == .key },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
             Button("다시 불러오기") {
@@ -264,7 +272,7 @@ struct TodoListView: View {
                 }
             } header: {
                 if title == "완료" {
-                    Text("완료 · \(tasks.count)")
+                    Text("오늘 완료 · \(tasks.count)")
                         .font(.caption).foregroundStyle(.secondary)
                         .accessibilityAddTraits(.isHeader)
                         .padding(.top, topSpacing).padding(.bottom, 4)

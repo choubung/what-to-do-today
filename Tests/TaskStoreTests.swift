@@ -126,6 +126,8 @@ private enum TaskStoreTests {
         try testStickyNoteConcurrency(in: directory)
         try testAddTaskWithStickyNote(in: directory)
         try testDayFiltering(in: directory)
+        try testHistoryPagination(in: directory)
+        try testCompletionCalendar(in: directory)
         try testStickySizePersistence(in: directory)
         try testStickyFontPersistence(in: directory)
         try testStickyColorPersistence(in: directory)
@@ -684,8 +686,8 @@ private enum TaskStoreTests {
                 ("어제 완료", start - 100_000, start - 1, false),
                 ("시작 시각 완료", start - 100_000, start, true),
                 ("마지막 순간 완료", start - 100_000, end - 1, true),
-                ("시작 시각 작성", start, end + 1, true),
-                ("마지막 순간 작성", end - 1, end + 1, true),
+                ("시작 시각 작성", start, end + 1, false),
+                ("마지막 순간 작성", end - 1, end + 1, false),
                 ("다음날 작성과 완료", end, end, false),
                 ("다음날 완료", start - 100_000, end, false)
             ]
@@ -701,20 +703,121 @@ private enum TaskStoreTests {
             }
 
             let snapshot = try store.fetchSnapshot(dayRange: range)
-            try expect(Set(snapshot.tasks.map(\.id)) == expectedIDs, "Today includes all incomplete tasks and completed tasks created or completed in the half-open local day")
+            try expect(Set(snapshot.tasks.map(\.id)) == expectedIDs, "Today includes all incomplete tasks and tasks completed in the half-open local day, regardless of creation time")
             try expect(Set(snapshot.stickyNotes.map(\.id)) == expectedIDs, "Snapshot note state must use the same day filter as its tasks")
             try expect(snapshot.tasks.prefix(2).allSatisfy { !$0.isCompleted }, "Filtering must preserve incomplete-first ordering")
             var pagedTasks: [TodoItem] = []
-            for index in 0..<3 {
+            for index in 0..<2 {
                 let page = try store.fetchPage(index: index, pageSize: 2, dayRange: range)
-                try expect(page.totalCount == expectedIDs.count && page.pageCount == 3, "Widget count and page bounds must use the filtered rows")
+                try expect(page.totalCount == expectedIDs.count + 1 && page.pageCount == 3 && !page.isHistory, "Widget pages must count today's rows and past completions separately")
                 pagedTasks.append(contentsOf: page.tasks)
             }
             try expect(pagedTasks == snapshot.tasks, "Filtered pagination must match snapshot ordering without gaps or duplicates")
-            try expect(try store.fetchPage(index: 99, pageSize: 2, dayRange: range).index == 2, "Page clamping must use the filtered count")
+            let history = try store.fetchPage(index: 99, pageSize: 2, dayRange: range)
+            try expect(history.index == 2 && history.isHistory && history.tasks.map(\.title) == ["어제 완료"], "History follows today's complete pages and excludes future completion dates")
+            let nextDay = calendar.dateInterval(of: .day, for: range.end)!
+            let nextSnapshot = try store.fetchSnapshot(dayRange: nextDay)
+            let nextHistory = try store.fetchPage(index: 2, pageSize: 4, dayRange: nextDay)
+            try expect(nextSnapshot.tasks.count == 6 && !nextSnapshot.tasks.contains { $0.title == "시작 시각 완료" }, "At local midnight yesterday's completions leave the current list")
+            try expect(nextHistory.isHistory && Set(nextHistory.tasks.map(\.title)) == ["어제 완료", "시작 시각 완료", "마지막 순간 완료"], "At local midnight yesterday's completions remain available on separate history pages")
             try expect(try store.fetchTasks().count == fixtures.count, "Today filtering must retain every stored task")
             try expect(try store.fetchSnapshot().tasks.count == fixtures.count, "Unfiltered snapshot callers must retain their previous behavior")
         }
+    }
+
+    private static func testHistoryPagination(in directory: URL) throws {
+        let start = Date(timeIntervalSince1970: 1_794_326_400)
+        let range = DateInterval(start: start, duration: 86_400)
+        for pageSize in [3, 8] {
+            let url = directory.appendingPathComponent("history-pages-\(pageSize).sqlite")
+            let store = try TodoStore(databaseURL: url)
+            var currentIDs = Set<UUID>()
+            var historyIDs = Set<UUID>()
+            for index in 0..<(pageSize + 1) {
+                let current = try store.addTask(title: "오늘 \(index)")
+                currentIDs.insert(current.id)
+                let historical = try store.addTask(title: "이전 \(index)")
+                historyIDs.insert(historical.id)
+                // A recent creation time must not pull a past completion into today's section.
+                try executeLegacySQL("""
+                    UPDATE todos SET created_at = \(start.timeIntervalSince1970 + 100),
+                        completed_at = \(start.timeIntervalSince1970 - Double(index + 1))
+                    WHERE id = '\(historical.id.uuidString)';
+                    """, at: url)
+                if index > 0 {
+                    try executeLegacySQL("""
+                        UPDATE todos SET completed_at = \(start.timeIntervalSince1970 + Double(index))
+                        WHERE id = '\(current.id.uuidString)';
+                        """, at: url)
+                }
+            }
+
+            let pages = try (0..<4).map { try store.fetchPage(index: $0, pageSize: pageSize, dayRange: range) }
+            try expect(pages.map { $0.tasks.count } == [pageSize, 1, pageSize, 1], "Both widget sizes must leave unused current rows blank before history starts")
+            try expect(pages.map(\.isHistory) == [false, false, true, true], "History must start on the next page, never in the current section")
+            try expect(pages.allSatisfy { $0.pageCount == 4 && $0.totalCount == (pageSize + 1) * 2 }, "All pages must share count and section-aware bounds")
+            try expect(Set(pages.prefix(2).flatMap(\.tasks).map(\.id)) == currentIDs, "Every current task must appear exactly once before history")
+            try expect(Set(pages.suffix(2).flatMap(\.tasks).map(\.id)) == historyIDs, "Every historical completion must appear exactly once after current tasks")
+            let hugePage = try store.fetchPage(index: Int.max, pageSize: Int.max, dayRange: range)
+            try expect(hugePage.index == 1 && hugePage.pageCount == 2 && hugePage.isHistory, "Large page sizes still require a separate history page without overflow")
+            try expect(try store.fetchPage(index: -1, pageSize: pageSize, dayRange: range).index == 0, "Negative requests clamp to the first current page")
+
+            for id in currentIDs { try store.deleteTask(id: id) }
+            let emptyCurrent = try store.fetchPage(index: 0, pageSize: pageSize, dayRange: range)
+            let firstHistory = try store.fetchPage(index: 1, pageSize: pageSize, dayRange: range)
+            try expect(emptyCurrent.tasks.isEmpty && !emptyCurrent.isHistory && emptyCurrent.hasNext && emptyCurrent.pageCount == 3, "An empty current list must retain its own first page")
+            try expect(firstHistory.isHistory && firstHistory.tasks.count == pageSize, "History begins on page two when today's list is empty")
+
+            let restored = firstHistory.tasks[0]
+            try store.setCompleted(id: restored.id, completed: false)
+            historyIDs.remove(restored.id)
+            let currentAfterUndo = try store.fetchPage(index: 0, pageSize: pageSize, dayRange: range)
+            let historyAfterUndo = try store.fetchPage(index: 99, pageSize: pageSize, dayRange: range)
+            try expect(currentAfterUndo.tasks.map(\.id) == [restored.id] && !currentAfterUndo.isHistory, "Undoing a historical completion returns it to the current list")
+            try expect(historyAfterUndo.index == 1 && historyAfterUndo.pageCount == 2 && Set(historyAfterUndo.tasks.map(\.id)) == historyIDs, "Undo must remove the history row and clamp a stale page selection")
+
+            for id in historyIDs { try store.deleteTask(id: id) }
+            let noHistory = try store.fetchPage(index: 99, pageSize: pageSize, dayRange: range)
+            try expect(noHistory.index == 0 && noHistory.pageCount == 1 && !noHistory.isHistory && noHistory.tasks.map(\.id) == [restored.id], "Deleting the last history rows must clamp back to the current page")
+            try store.deleteTask(id: restored.id)
+            let empty = try store.fetchPage(index: 99, pageSize: pageSize, dayRange: range)
+            try expect(empty.index == 0 && empty.pageCount == 1 && empty.tasks.isEmpty && !empty.hasNext, "An empty database has one current page")
+        }
+    }
+
+    private static func testCompletionCalendar(in directory: URL) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        let monthDate = calendar.date(from: DateComponents(year: 2026, month: 11, day: 15))!
+        let month = calendar.dateInterval(of: .month, for: monthDate)!
+        let url = directory.appendingPathComponent("completion-calendar.sqlite")
+        let store = try TodoStore(databaseURL: url)
+        let work = try store.createCategory(name: "업무")
+        let home = try store.createCategory(name: "생활")
+        let fixtures: [(title: String, categoryID: UUID, completion: Date?)] = [
+            ("이전 달", work.id, month.start.addingTimeInterval(-1)),
+            ("월 시작", work.id, month.start),
+            ("동시 완료 A", home.id, month.start.addingTimeInterval(100)),
+            ("동시 완료 B", home.id, month.start.addingTimeInterval(100)),
+            ("월 마지막", work.id, month.end.addingTimeInterval(-1)),
+            ("다음 달", work.id, month.end),
+            ("미완료", work.id, nil)
+        ]
+        for fixture in fixtures {
+            let task = try store.addTask(title: fixture.title, categoryID: fixture.categoryID)
+            let completed = fixture.completion.map { String($0.timeIntervalSince1970) } ?? "NULL"
+            try executeLegacySQL("""
+                UPDATE todos SET created_at = \(month.end.timeIntervalSince1970 + 100), completed_at = \(completed)
+                WHERE id = '\(task.id.uuidString)'
+                """, at: url)
+        }
+        let all = try store.fetchCompletedTasks(in: month)
+        try expect(all.count == 4 && all.first?.title == "월 마지막" && all.last?.title == "월 시작", "Calendar uses completion date with inclusive start and exclusive end, independent of creation")
+        try expect(all[1].id.uuidString < all[2].id.uuidString, "Equal completion timestamps use stable identity ordering")
+        let workTasks = try store.fetchCompletedTasks(in: month, categoryID: work.id)
+        try expect(workTasks.map(\.title) == ["월 마지막", "월 시작"], "Calendar category filtering must retain only that category's completed tasks")
+        try expect(try store.fetchCompletedTasks(in: month, categoryID: UUID()).isEmpty, "A stale category selection returns no unrelated history")
+        try expect(try store.fetchCompletedTasks(in: DateInterval(start: month.start, duration: 0)).isEmpty, "An empty date interval must return no completions")
     }
 
     private static func testAddTaskWithStickyNote(in directory: URL) throws {

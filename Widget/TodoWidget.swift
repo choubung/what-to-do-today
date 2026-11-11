@@ -12,6 +12,7 @@ struct TodoWidgetEntry: TimelineEntry {
     let familyKey: String
     let errorMessage: String?
     var categoryNames: [UUID: String] = [:]
+    var isHistory = false
 
     static func placeholder(for family: WidgetFamily) -> Self {
         let now = Date()
@@ -87,7 +88,8 @@ struct TodoWidgetProvider: TimelineProvider {
                 familyKey: familyKey,
                 errorMessage: TodoWidgetState.actionFailed(for: familyKey)
                     ? "저장하지 못했어요. 다시 시도해 주세요." : nil,
-                categoryNames: Dictionary(uniqueKeysWithValues: try store.fetchCategories().map { ($0.id, $0.name) })
+                categoryNames: Dictionary(uniqueKeysWithValues: try store.fetchCategories().map { ($0.id, $0.name) }),
+                isHistory: page.isHistory
             )
         } catch {
             return unavailableEntry(for: familyKey, at: date)
@@ -110,7 +112,7 @@ struct TodoWidgetView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Link(destination: URL(string: "whattodotoday://open")!) {
-                    Text(todoWidgetTitle)
+                    Text(entry.isHistory ? "이전 완료" : todoWidgetTitle)
                         .font(.headline)
                 }
                 Spacer()
@@ -161,12 +163,22 @@ struct TodoWidgetView: View {
                                     Text(name).font(.caption2).foregroundStyle(.secondary)
                                         .lineLimit(1).frame(maxWidth: 70, alignment: .trailing)
                                 }
+                                if entry.isHistory, let completedAt = task.completedAt {
+                                    Text(completedAt, format: .dateTime.year(.twoDigits).month(.twoDigits).day(.twoDigits))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                        .lineLimit(1).fixedSize()
+                                        .accessibilityLabel("완료일 \(completedAt.formatted(date: .long, time: .omitted))")
+                                }
                             }
                         }
                         .toggleStyle(.checkbox)
                         .transition(.identity)
                         .accessibilityLabel(task.title)
-                        .accessibilityValue((task.isCompleted ? "완료" : "미완료") + (task.categoryID.flatMap { entry.categoryNames[$0] }.map { ", \($0)" } ?? ""))
+                        .accessibilityValue(
+                            (task.isCompleted ? "완료" : "미완료")
+                            + (task.categoryID.flatMap { entry.categoryNames[$0] }.map { ", \($0)" } ?? "")
+                            + (entry.isHistory ? task.completedAt.map { ", 완료일 \($0.formatted(date: .long, time: .omitted))" } ?? "" : "")
+                        )
                     }
                 }
                 .transition(.identity)
