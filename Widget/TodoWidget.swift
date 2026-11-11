@@ -1,6 +1,8 @@
 import SwiftUI
 import WidgetKit
 
+private let todoWidgetTitle = "To Do"
+
 struct TodoWidgetEntry: TimelineEntry {
     let date: Date
     let tasks: [TodoItem]
@@ -105,7 +107,7 @@ struct TodoWidgetView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Link(destination: URL(string: "whattodotoday://open")!) {
-                    Text("To Do")
+                    Text(todoWidgetTitle)
                         .font(.headline)
                 }
                 Spacer()
@@ -218,7 +220,7 @@ struct TodoWidget: Widget {
         StaticConfiguration(kind: kind, provider: TodoWidgetProvider()) { entry in
             TodoWidgetView(entry: entry)
         }
-        .configurationDisplayName("할 일")
+        .configurationDisplayName(todoWidgetTitle)
         .description("할 일을 확인하고 완료하세요. 이전·다음 버튼으로 목록을 넘길 수 있어요.")
         .supportedFamilies([.systemMedium, .systemLarge])
     }
