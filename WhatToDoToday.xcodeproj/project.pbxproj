@@ -5,6 +5,16 @@
 	};
 	"objectVersion" = 56;
 	"objects" = {
+		"D4762988CB514F8DAB91DEB7" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "image.icns";
+			"path" = "App/Resources/AppIcon.icns";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"32C87A6E954D42BD830E707E" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "D4762988CB514F8DAB91DEB7";
+		};
 		"CBDF94E9B23E44938BE6C130" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -113,6 +123,7 @@
 				"7457B5880437C09960B360CD",
 				"624A8F936E0903B5DF7F6FC4",
 				"B813F16BDC02AC6F98158E40",
+				"D4762988CB514F8DAB91DEB7",
 			);
 			"name" = "App";
 			"sourceTree" = "<group>";
@@ -489,6 +500,7 @@
 			"isa" = "PBXResourcesBuildPhase";
 			"buildActionMask" = 2147483647;
 			"files" = (
+				"32C87A6E954D42BD830E707E",
 			);
 			"runOnlyForDeploymentPostprocessing" = 0;
 		};
