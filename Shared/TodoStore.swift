@@ -9,6 +9,8 @@ enum TodoStoreError: LocalizedError {
     case invalidCategoryName
     case duplicateCategoryName
     case missingCategory
+    case lastCategory
+    case invalidCategoryDestination
     case unavailableAppGroup
     case invalidPageSize
     case invalidPosition
@@ -30,6 +32,10 @@ enum TodoStoreError: LocalizedError {
             return "같은 이름의 카테고리가 이미 있어요."
         case .missingCategory:
             return "이 카테고리를 찾을 수 없어요. 다시 선택해 주세요."
+        case .lastCategory:
+            return "카테고리는 최소 하나가 필요해요. 마지막 카테고리는 삭제할 수 없어요."
+        case .invalidCategoryDestination:
+            return "할 일을 옮길 다른 카테고리를 선택해 주세요."
         case .invalidReminder:
             return "알림 시간을 확인해 주세요."
         case .completedTaskReminder:
@@ -158,12 +164,12 @@ final class TodoStore: @unchecked Sendable {
     @discardableResult
     func addTask(title: String, categoryID: UUID? = nil, showAsStickyNote: Bool = false) throws -> TodoItem {
         let title = try validatedTitle(title)
-        let task = TodoItem(id: UUID(), title: title, createdAt: Date(), completedAt: nil, categoryID: categoryID)
         lock.lock()
         defer { lock.unlock() }
 
         return try withTransaction(readOnly: false) {
-            try requireCategory(categoryID)
+            let categoryID = try resolvedCategoryID(categoryID)
+            let task = TodoItem(id: UUID(), title: title, createdAt: Date(), completedAt: nil, categoryID: categoryID)
             let statement = try prepare("INSERT INTO todos (id, title, created_at, category_id) VALUES (?, ?, ?, ?)")
             defer { sqlite3_finalize(statement) }
             try bind(task.id.uuidString, to: statement, at: 1)
@@ -200,7 +206,7 @@ final class TodoStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         try withTransaction(readOnly: false) {
-            try requireCategory(categoryID)
+            let categoryID = try resolvedCategoryID(categoryID)
             let statement = try prepare("UPDATE todos SET title = ?, category_id = ? WHERE id = ?")
             defer { sqlite3_finalize(statement) }
             try bind(title, to: statement, at: 1)
@@ -214,7 +220,7 @@ final class TodoStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         try withTransaction(readOnly: false) {
-            try requireCategory(categoryID)
+            let categoryID = try resolvedCategoryID(categoryID)
             let statement = try prepare("UPDATE todos SET category_id = ? WHERE id = ?")
             defer { sqlite3_finalize(statement) }
             try bindCategoryID(categoryID, to: statement, at: 1)
@@ -263,14 +269,33 @@ final class TodoStore: @unchecked Sendable {
         }
     }
 
-    func deleteCategory(id: UUID) throws {
+    func deleteCategory(id: UUID, movingTasksTo destinationID: UUID? = nil) throws {
         lock.lock()
         defer { lock.unlock() }
-        let statement = try prepare("DELETE FROM categories WHERE id = ?")
-        defer { sqlite3_finalize(statement) }
-        try bind(id.uuidString, to: statement, at: 1)
-        // ON DELETE SET NULL keeps every task, completion date and sticky note intact.
-        try finishWrite(statement)
+        try withTransaction(readOnly: false) {
+            let categories = try readCategories()
+            // Retrying a successful deletion must not move any unrelated tasks.
+            guard categories.contains(where: { $0.id == id }) else { return }
+            guard categories.count > 1 else { throw TodoStoreError.lastCategory }
+            let defaultID = try readDefaultCategoryID()
+            let destination = destinationID ?? (defaultID == id
+                ? categories.first(where: { $0.id != id })!.id : defaultID)
+            guard destination != id else { throw TodoStoreError.invalidCategoryDestination }
+            try requireCategory(destination)
+
+            // Change the default first: legacy NULL writers always resolve to a surviving category.
+            if defaultID == id { try writeDefaultCategoryID(destination) }
+            let move = try prepare("UPDATE todos SET category_id = ? WHERE category_id = ?")
+            defer { sqlite3_finalize(move) }
+            try bind(destination.uuidString, to: move, at: 1)
+            try bind(id.uuidString, to: move, at: 2)
+            try finishWrite(move)
+
+            let statement = try prepare("DELETE FROM categories WHERE id = ?")
+            defer { sqlite3_finalize(statement) }
+            try bind(id.uuidString, to: statement, at: 1)
+            try finishWrite(statement)
+        }
     }
 
     func deleteTask(id: UUID) throws {
@@ -560,6 +585,10 @@ final class TodoStore: @unchecked Sendable {
                     name TEXT NOT NULL,
                     name_key TEXT NOT NULL UNIQUE
                 );
+                CREATE TABLE IF NOT EXISTS category_settings (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    default_category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE RESTRICT
+                );
                 CREATE TABLE IF NOT EXISTS todos (
                     id TEXT PRIMARY KEY NOT NULL,
                     title TEXT NOT NULL,
@@ -629,7 +658,81 @@ final class TodoStore: @unchecked Sendable {
                 try execute("ALTER TABLE todos ADD COLUMN category_id TEXT REFERENCES categories(id) ON DELETE SET NULL")
             }
             try execute("CREATE INDEX IF NOT EXISTS todos_category ON todos(category_id)")
+            try configureRequiredCategories()
         }
+    }
+
+    /// Runs inside the schema transaction, including when app and widget first open together.
+    private func configureRequiredCategories() throws {
+        let existing = try prepare("""
+            SELECT c.id FROM categories c JOIN category_settings s
+                ON c.id = s.default_category_id WHERE s.singleton = 1
+            """)
+        defer { sqlite3_finalize(existing) }
+        let result = sqlite3_step(existing)
+        if result == SQLITE_DONE {
+            // Reuse a user's existing '기본' category instead of duplicating or renaming it.
+            let named = try prepare("SELECT id FROM categories WHERE name_key = '기본'")
+            defer { sqlite3_finalize(named) }
+            let namedResult = sqlite3_step(named)
+            let defaultID: UUID
+            if namedResult == SQLITE_ROW {
+                guard let id = UUID(uuidString: stringColumn(named, index: 0)) else {
+                    throw TodoStoreError.invalidRecord
+                }
+                defaultID = id
+            } else if namedResult == SQLITE_DONE {
+                defaultID = UUID()
+                let insert = try prepare("INSERT INTO categories (id, name, name_key) VALUES (?, '기본', '기본')")
+                defer { sqlite3_finalize(insert) }
+                try bind(defaultID.uuidString, to: insert, at: 1)
+                try finishWrite(insert)
+            } else {
+                throw databaseError()
+            }
+            try writeDefaultCategoryID(defaultID)
+        } else if result != SQLITE_ROW {
+            throw databaseError()
+        }
+
+        // Only the category changes; completion, reminder and sticky-note columns remain intact.
+        try execute("""
+            UPDATE todos SET category_id = (SELECT default_category_id FROM category_settings WHERE singleton = 1)
+                WHERE category_id IS NULL OR category_id NOT IN (SELECT id FROM categories);
+
+            CREATE TRIGGER IF NOT EXISTS require_valid_category_on_insert
+            BEFORE INSERT ON todos
+            WHEN NEW.category_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM categories WHERE id = NEW.category_id)
+            BEGIN SELECT RAISE(ABORT, 'Unknown todo category'); END;
+            CREATE TRIGGER IF NOT EXISTS require_valid_category_on_update
+            BEFORE UPDATE OF category_id ON todos
+            WHEN NEW.category_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM categories WHERE id = NEW.category_id)
+            BEGIN SELECT RAISE(ABORT, 'Unknown todo category'); END;
+
+            CREATE TRIGGER IF NOT EXISTS assign_default_category_on_insert
+            AFTER INSERT ON todos WHEN NEW.category_id IS NULL
+            BEGIN
+                UPDATE todos SET category_id = (SELECT default_category_id FROM category_settings WHERE singleton = 1)
+                    WHERE id = NEW.id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS assign_default_category_on_update
+            AFTER UPDATE OF category_id ON todos WHEN NEW.category_id IS NULL
+            BEGIN
+                UPDATE todos SET category_id = (SELECT default_category_id FROM category_settings WHERE singleton = 1)
+                    WHERE id = NEW.id;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS protect_default_category
+            BEFORE DELETE ON categories
+            WHEN OLD.id = (SELECT default_category_id FROM category_settings WHERE singleton = 1)
+            BEGIN SELECT RAISE(ABORT, 'Choose a replacement default category before deleting'); END;
+            CREATE TRIGGER IF NOT EXISTS move_tasks_after_legacy_category_delete
+            AFTER DELETE ON categories
+            BEGIN
+                UPDATE todos SET category_id = (SELECT default_category_id FROM category_settings WHERE singleton = 1)
+                    WHERE category_id = OLD.id;
+            END;
+            """)
     }
 
     private func stickyNoteColumns() throws -> Set<String> {
@@ -825,8 +928,39 @@ final class TodoStore: @unchecked Sendable {
         guard result == SQLITE_ROW else { throw databaseError() }
     }
 
+    private func readDefaultCategoryID() throws -> UUID {
+        let statement = try prepare("SELECT default_category_id FROM category_settings WHERE singleton = 1")
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let id = UUID(uuidString: stringColumn(statement, index: 0)) else {
+            throw TodoStoreError.invalidRecord
+        }
+        return id
+    }
+
+    private func writeDefaultCategoryID(_ id: UUID) throws {
+        let statement = try prepare("""
+            INSERT INTO category_settings (singleton, default_category_id) VALUES (1, ?)
+            ON CONFLICT(singleton) DO UPDATE SET default_category_id = excluded.default_category_id
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bind(id.uuidString, to: statement, at: 1)
+        try finishWrite(statement)
+    }
+
+    private func resolvedCategoryID(_ id: UUID?) throws -> UUID {
+        let resolved = try id ?? readDefaultCategoryID()
+        try requireCategory(resolved)
+        return resolved
+    }
+
     private func readCategories() throws -> [TodoCategory] {
-        let statement = try prepare("SELECT id, name FROM categories ORDER BY name_key, id")
+        let statement = try prepare("""
+            SELECT c.id, c.name, c.id = s.default_category_id,
+                (SELECT COUNT(*) FROM todos t WHERE t.category_id = c.id)
+            FROM categories c JOIN category_settings s ON s.singleton = 1
+            ORDER BY (c.id = s.default_category_id) DESC, c.name_key, c.id
+            """)
         defer { sqlite3_finalize(statement) }
         var categories: [TodoCategory] = []
         var result = sqlite3_step(statement)
@@ -834,7 +968,11 @@ final class TodoStore: @unchecked Sendable {
             guard let id = UUID(uuidString: stringColumn(statement, index: 0)) else {
                 throw TodoStoreError.invalidRecord
             }
-            categories.append(TodoCategory(id: id, name: stringColumn(statement, index: 1)))
+            categories.append(TodoCategory(
+                id: id, name: stringColumn(statement, index: 1),
+                isDefault: sqlite3_column_int(statement, 2) != 0,
+                taskCount: Int(sqlite3_column_int64(statement, 3))
+            ))
             result = sqlite3_step(statement)
         }
         guard result == SQLITE_DONE else { throw databaseError() }
@@ -874,12 +1012,8 @@ final class TodoStore: @unchecked Sendable {
             }
             let completedAt = sqlite3_column_type(statement, 3) == SQLITE_NULL
                 ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
-            var categoryID: UUID?
-            if sqlite3_column_type(statement, 4) != SQLITE_NULL {
-                guard let savedID = UUID(uuidString: stringColumn(statement, index: 4)) else {
-                    throw TodoStoreError.invalidRecord
-                }
-                categoryID = savedID
+            guard let categoryID = UUID(uuidString: stringColumn(statement, index: 4)) else {
+                throw TodoStoreError.invalidRecord
             }
             tasks.append(TodoItem(
                 id: id,

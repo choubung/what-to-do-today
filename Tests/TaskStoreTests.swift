@@ -130,6 +130,7 @@ private enum TaskStoreTests {
         try testStickyFontPersistence(in: directory)
         try testStickyColorPersistence(in: directory)
         try testCategories(in: directory)
+        try testRequiredCategoryMigration(in: directory)
         try testReminders(in: directory)
         print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, concurrency, and sticky-note migration/state tests.")
     }
@@ -286,13 +287,14 @@ private enum TaskStoreTests {
         let store = try TodoStore(databaseURL: url)
         let secondConnection = try TodoStore(databaseURL: url)
         let migrated = try store.fetchSnapshot()
-        try expect(migrated.tasks == [TodoItem(id: legacyID, title: "기존 할 일", createdAt: Date(timeIntervalSince1970: 100), completedAt: nil)], "Category migration must preserve all legacy task data as uncategorized")
-        try expect(migrated.categories.isEmpty, "Migration must not invent user categories")
+        let defaultCategory = migrated.categories.first(where: \.isDefault)!
+        try expect(migrated.tasks == [TodoItem(id: legacyID, title: "기존 할 일", createdAt: Date(timeIntervalSince1970: 100), completedAt: nil, categoryID: defaultCategory.id)], "Category migration must preserve all legacy task data and assign the default")
+        try expect(migrated.categories.count == 1 && defaultCategory.name == "기본" && defaultCategory.taskCount == 1, "Migration must provide one default category with an accurate task count")
 
         let work = try store.createCategory(name: "  Work  ")
         let personal = try secondConnection.createCategory(name: "개인")
         try expect(work.name == "Work", "Category names must trim outer whitespace")
-        try expect(try store.fetchCategories().count == 2, "Category changes must be visible across app/widget connections")
+        try expect(try store.fetchCategories().count == 3, "Category changes must be visible across app/widget connections")
         for invalidName in ["", " \n ", String(repeating: "가", count: 31), "줄\n바꿈"] {
             do {
                 try store.createCategory(name: invalidName)
@@ -319,7 +321,7 @@ private enum TaskStoreTests {
         let edited = try secondConnection.fetchTasks().first { $0.id == task.id }!
         try expect(edited.title == "제목과 분류 수정" && edited.categoryID == personal.id, "Title and category edits must persist atomically")
         try store.setCategory(id: task.id, categoryID: nil)
-        try expect(try secondConnection.fetchPage(index: 0, pageSize: 8).tasks.first { $0.id == task.id }?.categoryID == nil, "Widgets must read uncategorized assignments")
+        try expect(try secondConnection.fetchPage(index: 0, pageSize: 8).tasks.first { $0.id == task.id }?.categoryID == defaultCategory.id, "Nil assignment must resolve to the default for app and widget")
         try store.setCategory(id: task.id, categoryID: work.id)
 
         let beforeRejected = try store.fetchSnapshot()
@@ -339,14 +341,14 @@ private enum TaskStoreTests {
             throw TestFailure(description: "Renaming to an existing category was accepted")
         } catch TodoStoreError.duplicateCategoryName {}
         try store.renameCategory(id: work.id, name: "업무")
-        try expect(try secondConnection.fetchSnapshot().categories.contains(TodoCategory(id: work.id, name: "업무")), "Renaming must retain category identity")
+        try expect(try secondConnection.fetchSnapshot().categories.contains { $0.id == work.id && $0.name == "업무" }, "Renaming must retain category identity")
         try store.setCompleted(id: task.id, completed: true)
         let beforeDelete = try store.fetchSnapshot()
-        try secondConnection.deleteCategory(id: work.id)
+        try secondConnection.deleteCategory(id: work.id, movingTasksTo: personal.id)
         try secondConnection.deleteCategory(id: work.id)
         let afterDelete = try store.fetchSnapshot()
         let preserved = afterDelete.tasks.first { $0.id == task.id }!
-        try expect(preserved.categoryID == nil && preserved.completedAt == beforeDelete.tasks.first { $0.id == task.id }?.completedAt, "Deleting a category must preserve completed tasks and completion times")
+        try expect(preserved.categoryID == personal.id && preserved.completedAt == beforeDelete.tasks.first { $0.id == task.id }?.completedAt, "Deleting a category must move completed tasks and preserve completion times")
         try expect(afterDelete.tasks.count == beforeDelete.tasks.count && afterDelete.stickyNotes == beforeDelete.stickyNotes, "Category deletion must preserve all task and sticky-note records")
         try expect(try TodoStore(databaseURL: url).fetchSnapshot() == afterDelete, "Categories and assignments must survive reopening")
 
@@ -362,6 +364,135 @@ private enum TaskStoreTests {
         }
         try concurrentFailures.check()
         try expect(try store.fetchCategories().filter { $0.name == "동시 카테고리" }.count == 1, "Concurrent category creation must not produce duplicates")
+    }
+
+    private static func testRequiredCategoryMigration(in directory: URL) throws {
+        let url = directory.appendingPathComponent("legacy-p2-required-category.sqlite")
+        let existingDefault = UUID()
+        let completedID = UUID()
+        let pendingID = UUID()
+        let assignedID = UUID()
+        let generationID = UUID()
+        try executeLegacySQL("""
+            CREATE TABLE categories (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE);
+            CREATE TABLE todos (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, created_at REAL NOT NULL, completed_at REAL,
+                category_id TEXT REFERENCES categories(id) ON DELETE SET NULL
+            );
+            CREATE TABLE sticky_notes (
+                todo_id TEXT PRIMARY KEY NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+                is_visible INTEGER NOT NULL, is_always_on_top INTEGER NOT NULL,
+                position_x REAL, position_y REAL, display_id TEXT,
+                width REAL, height REAL, font_size REAL, color_hex TEXT
+            );
+            CREATE TABLE todo_reminders (
+                todo_id TEXT PRIMARY KEY NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+                generation_id TEXT NOT NULL UNIQUE, year INTEGER NOT NULL, month INTEGER NOT NULL,
+                day INTEGER NOT NULL, hour INTEGER NOT NULL, minute INTEGER NOT NULL, delivered_at REAL
+            );
+            INSERT INTO categories VALUES ('\(existingDefault.uuidString)', '기본', '기본');
+            INSERT INTO todos VALUES ('\(completedID.uuidString)', '지난 완료', 100, 200, NULL);
+            INSERT INTO todos VALUES ('\(pendingID.uuidString)', '기존 알림', 300, NULL, NULL);
+            INSERT INTO todos VALUES ('\(assignedID.uuidString)', '기존 분류', 400, NULL, '\(existingDefault.uuidString)');
+            INSERT INTO sticky_notes VALUES ('\(pendingID.uuidString)', 1, 1, 12, 24, 'external', 300, 220, 20, '#ABCDEF');
+            INSERT INTO todo_reminders VALUES ('\(pendingID.uuidString)', '\(generationID.uuidString)', 2026, 11, 11, 10, 0, 500);
+            """, at: url)
+
+        let store = try TodoStore(databaseURL: url)
+        let migrated = try store.fetchSnapshot()
+        try expect(migrated.categories == [TodoCategory(id: existingDefault, name: "기본", isDefault: true, taskCount: 3)], "Migration must adopt an existing default-named category without duplicating it")
+        try expect(migrated.tasks.allSatisfy { $0.categoryID == existingDefault }, "Migration must categorize both historical completed tasks and incomplete tasks")
+        try expect(migrated.tasks.first { $0.id == completedID } == TodoItem(id: completedID, title: "지난 완료", createdAt: Date(timeIntervalSince1970: 100), completedAt: Date(timeIntervalSince1970: 200), categoryID: existingDefault), "Historical task dates and content must survive category migration")
+        let originalNote = StickyNoteState(id: pendingID, isVisible: true, isAlwaysOnTop: true, position: StickyNotePosition(x: 12, y: 24, displayID: "external"), size: StickyNoteSize(width: 300, height: 220), fontSize: 20, colorHex: "#ABCDEF")
+        try expect(migrated.stickyNotes == [originalNote], "Migration must preserve complete sticky-note state")
+        try expect(migrated.reminders.count == 1 && migrated.reminders[0].generationID == generationID && migrated.reminders[0].deliveredAt == Date(timeIntervalSince1970: 500), "Migration must preserve reminder schedule and delivery generation")
+        let today = DateInterval(start: Date(timeIntervalSince1970: 10_000), duration: 86_400)
+        let todaySnapshot = try store.fetchSnapshot(dayRange: today)
+        try expect(todaySnapshot.tasks.count == 2 && todaySnapshot.categories.first?.taskCount == 3, "Deletion counts must include completed tasks hidden by the today filter")
+
+        try store.renameCategory(id: existingDefault, name: "생활")
+        let reopened = try TodoStore(databaseURL: url)
+        try expect(try reopened.fetchCategories() == [TodoCategory(id: existingDefault, name: "생활", isDefault: true, taskCount: 3)], "Renaming and reopening must preserve default identity without recreating '기본'")
+        let automatic = try reopened.addTask(title: "기본 자동 배정")
+        try expect(automatic.categoryID == existingDefault, "Quick-add APIs must return the category actually saved")
+        try store.updateTask(id: automatic.id, title: "기본 자동 수정", categoryID: nil)
+        try expect(try store.fetchTasks().first { $0.id == automatic.id }?.categoryID == existingDefault, "An omitted update category must also resolve to the default")
+
+        let target = try store.createCategory(name: "업무")
+        let beforeFailure = try store.fetchSnapshot()
+        do {
+            try store.deleteCategory(id: existingDefault, movingTasksTo: existingDefault)
+            throw TestFailure(description: "Self category move was accepted")
+        } catch TodoStoreError.invalidCategoryDestination {}
+        do {
+            try store.deleteCategory(id: existingDefault, movingTasksTo: UUID())
+            throw TestFailure(description: "Missing category destination was accepted")
+        } catch TodoStoreError.missingCategory {}
+        try expect(try store.fetchSnapshot() == beforeFailure, "Invalid moves must leave every category and task unchanged")
+
+        // Fail after the move and default change to prove the entire operation rolls back.
+        try executeLegacySQL("""
+            CREATE TRIGGER fail_category_delete BEFORE DELETE ON categories
+                WHEN OLD.id = '\(existingDefault.uuidString)'
+                BEGIN SELECT RAISE(ABORT, 'injected failure'); END;
+            """, at: url)
+        do {
+            try store.deleteCategory(id: existingDefault, movingTasksTo: target.id)
+            throw TestFailure(description: "Injected category deletion failure was ignored")
+        } catch TodoStoreError.database {}
+        try expect(try store.fetchSnapshot() == beforeFailure, "A failed delete must roll back moved tasks and the replacement default")
+        try executeLegacySQL("DROP TRIGGER fail_category_delete", at: url)
+        try store.deleteCategory(id: existingDefault, movingTasksTo: target.id)
+        let moved = try reopened.fetchSnapshot()
+        try expect(moved.categories == [TodoCategory(id: target.id, name: "업무", isDefault: true, taskCount: 4)], "Deleting the default must transfer default identity and all tasks to the chosen destination")
+        try expect(moved.tasks.allSatisfy { $0.categoryID == target.id } && moved.stickyNotes == beforeFailure.stickyNotes && moved.reminders == beforeFailure.reminders, "Moving on deletion must preserve all sticky notes and reminders")
+        try expect(moved.tasks.first { $0.id == completedID }?.completedAt == Date(timeIntervalSince1970: 200), "Category moves must preserve completion history")
+        do {
+            try store.deleteCategory(id: target.id)
+            throw TestFailure(description: "The last category was deleted")
+        } catch TodoStoreError.lastCategory {}
+
+        // Old app/widget processes can still issue nullable SQL while the new app is installed.
+        let oldWriterID = UUID()
+        try executeLegacySQL("""
+            INSERT INTO todos (id, title, created_at) VALUES ('\(oldWriterID.uuidString)', '구버전 입력', 600);
+            UPDATE todos SET category_id = NULL WHERE id = '\(automatic.id.uuidString)';
+            """, at: url)
+        try expect(try store.fetchTasks().allSatisfy { $0.categoryID == target.id }, "Legacy NULL inserts and updates must immediately inherit the surviving default")
+        let legacyCategory = try store.createCategory(name: "구버전 삭제")
+        try store.setCategory(id: oldWriterID, categoryID: legacyCategory.id)
+        try executeLegacySQL("PRAGMA foreign_keys = OFF; DELETE FROM categories WHERE id = '\(legacyCategory.id.uuidString)'", at: url)
+        try expect(try store.fetchTasks().first { $0.id == oldWriterID }?.categoryID == target.id, "Legacy deletion without foreign keys must not leave an orphaned task")
+        let legacyForeignKeyCategory = try store.createCategory(name: "구버전 FK 삭제")
+        try store.setCategory(id: oldWriterID, categoryID: legacyForeignKeyCategory.id)
+        try executeLegacySQL("PRAGMA foreign_keys = ON; DELETE FROM categories WHERE id = '\(legacyForeignKeyCategory.id.uuidString)'", at: url)
+        try expect(try store.fetchTasks().first { $0.id == oldWriterID }?.categoryID == target.id, "Legacy foreign-key SET NULL deletion must immediately assign the default")
+        for invalidSQL in [
+            "UPDATE todos SET category_id = '\(UUID().uuidString)' WHERE id = '\(oldWriterID.uuidString)'",
+            "DELETE FROM categories WHERE id = '\(target.id.uuidString)'"
+        ] {
+            var rejected = false
+            do { try executeLegacySQL("PRAGMA foreign_keys = OFF; \(invalidSQL)", at: url) }
+            catch { rejected = true }
+            try expect(rejected, "Database guards must reject unknown categories and deleting the active default, even without foreign keys")
+        }
+
+        let successor = try store.createCategory(name: "다음 기본")
+        let failures = ConcurrentFailures()
+        DispatchQueue.concurrentPerform(iterations: 2) { worker in
+            do {
+                let connection = try TodoStore(databaseURL: url)
+                if worker == 0 {
+                    try connection.deleteCategory(id: target.id, movingTasksTo: successor.id)
+                } else {
+                    for index in 0..<20 { try connection.addTask(title: "동시 기본 입력 \(index)") }
+                }
+            } catch { failures.append(error) }
+        }
+        try failures.check()
+        let final = try TodoStore(databaseURL: url).fetchSnapshot()
+        try expect(final.tasks.count == 25 && final.tasks.allSatisfy { $0.categoryID == successor.id }, "Concurrent creation and default deletion must keep every task in the surviving category")
+        try expect(final.categories == [TodoCategory(id: successor.id, name: "다음 기본", isDefault: true, taskCount: 25)], "Exactly one default and accurate counts must survive concurrent operations and reopening")
     }
 
     private static func testStickyFontPersistence(in directory: URL) throws {
@@ -487,7 +618,7 @@ private enum TaskStoreTests {
         let store = try TodoStore(databaseURL: url)
         let position = StickyNotePosition(x: -25, y: 100, displayID: "external")
         let migrated = try store.fetchSnapshot()
-        try expect(migrated.tasks == [TodoItem(id: id, title: "기존 포스트잇", createdAt: Date(timeIntervalSince1970: 100), completedAt: nil)], "Size migration must preserve every task field")
+        try expect(migrated.tasks == [TodoItem(id: id, title: "기존 포스트잇", createdAt: Date(timeIntervalSince1970: 100), completedAt: nil, categoryID: migrated.categories.first(where: \.isDefault)!.id)], "Size migration must preserve task content and assign the default category")
         try expect(migrated.stickyNotes == [StickyNoteState(id: id, isVisible: false, isAlwaysOnTop: true, position: position)], "Existing notes must preserve visibility, pinning, and position with an unset size")
 
         let size = StickyNoteSize(width: 310, height: 230)
@@ -631,9 +762,10 @@ private enum TaskStoreTests {
             INSERT INTO todos VALUES ('\(completedID.uuidString)', '기존 완료', 200, 300);
             """, at: databaseURL)
         let store = try TodoStore(databaseURL: databaseURL)
+        let defaultID = try store.fetchCategories().first(where: \.isDefault)!.id
         let originalTasks = [
-            TodoItem(id: incompleteID, title: "기존 미완료", createdAt: Date(timeIntervalSince1970: 100), completedAt: nil),
-            TodoItem(id: completedID, title: "기존 완료", createdAt: Date(timeIntervalSince1970: 200), completedAt: Date(timeIntervalSince1970: 300))
+            TodoItem(id: incompleteID, title: "기존 미완료", createdAt: Date(timeIntervalSince1970: 100), completedAt: nil, categoryID: defaultID),
+            TodoItem(id: completedID, title: "기존 완료", createdAt: Date(timeIntervalSince1970: 200), completedAt: Date(timeIntervalSince1970: 300), categoryID: defaultID)
         ]
         let migrated = try store.fetchSnapshot()
         try expect(migrated.tasks == originalTasks && migrated.stickyNotes.isEmpty, "P0 migration must preserve every existing task field")
