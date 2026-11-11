@@ -25,10 +25,11 @@ struct StickyNoteState: Identifiable, Equatable, Sendable {
     let position: StickyNotePosition?
     let size: StickyNoteSize?
     let fontSize: Double?
+    let colorHex: String?
 
     init(
         id: UUID, isVisible: Bool, isAlwaysOnTop: Bool, position: StickyNotePosition?,
-        size: StickyNoteSize? = nil, fontSize: Double? = nil
+        size: StickyNoteSize? = nil, fontSize: Double? = nil, colorHex: String? = nil
     ) {
         self.id = id
         self.isVisible = isVisible
@@ -36,6 +37,7 @@ struct StickyNoteState: Identifiable, Equatable, Sendable {
         self.position = position
         self.size = size
         self.fontSize = fontSize
+        self.colorHex = colorHex
     }
 }
 
