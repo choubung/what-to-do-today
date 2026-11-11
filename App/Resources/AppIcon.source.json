@@ -1,0 +1,7 @@
+{
+  "method": "built-in image generation and editing",
+  "design": "Blank warm pale-yellow sticky note with a curled lower-right corner. Transparent background, no text or symbols.",
+  "userRevision": "Remove the checkmark entirely.",
+  "finalPrompt": "Use case: precise-object-edit. Asset type: macOS app icon. Edit target: the attached pale yellow rounded sticky-note icon. Remove the gray checkmark completely, restoring an uninterrupted blank pale yellow paper surface. Preserve the existing note silhouette, scale, placement, soft paper shading, and curled lower-right corner. Keep only the single clean blank sticky note; no text, lines, symbols, marks, or added objects. Output a square production-ready icon with truly transparent background and clean antialiased edges, no detached pixels outside the silhouette.",
+  "rebuild": "bash Scripts/build-icon.sh"
+}
