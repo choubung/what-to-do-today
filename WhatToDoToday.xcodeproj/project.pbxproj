@@ -5,6 +5,12 @@
 	};
 	"objectVersion" = 56;
 	"objects" = {
+		"4E475637B0A8FD15369B74C7" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.xcconfig";
+			"path" = "Configuration.xcconfig";
+			"sourceTree" = "SOURCE_ROOT";
+		};
 		"FD52AB7CD648A21D9F37D67C" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -150,6 +156,7 @@
 		"B28B7AF69320201D1CF206EB" = {
 			"isa" = "PBXGroup";
 			"children" = (
+				"4E475637B0A8FD15369B74C7",
 				"1C48CE29E4E135EE62951B22",
 				"44C7E229889FE9D1BB841A79",
 				"156052F04525D0F710673CF0",
@@ -160,6 +167,7 @@
 		};
 		"89E1FD6268CC0F221A2BE178" = {
 			"isa" = "XCBuildConfiguration";
+			"baseConfigurationReference" = "4E475637B0A8FD15369B74C7";
 			"buildSettings" = {
 				"MACOSX_DEPLOYMENT_TARGET" = "27.0.1";
 				"SDKROOT" = "macosx";
@@ -176,6 +184,7 @@
 		};
 		"E6DE6C99132752C914FEF632" = {
 			"isa" = "XCBuildConfiguration";
+			"baseConfigurationReference" = "4E475637B0A8FD15369B74C7";
 			"buildSettings" = {
 				"MACOSX_DEPLOYMENT_TARGET" = "27.0.1";
 				"SDKROOT" = "macosx";
