@@ -7,6 +7,8 @@ enum TodoStoreError: LocalizedError {
     case unavailableAppGroup
     case invalidPageSize
     case invalidPosition
+    case invalidSize
+    case invalidFontSize
     case invalidRecord
     case database(String)
 
@@ -22,6 +24,10 @@ enum TodoStoreError: LocalizedError {
             return "목록의 페이지 크기가 올바르지 않아요."
         case .invalidPosition:
             return "포스트잇 위치를 저장할 수 없어요."
+        case .invalidSize:
+            return "포스트잇 크기를 저장할 수 없어요."
+        case .invalidFontSize:
+            return "포스트잇 글자 크기를 저장할 수 없어요."
         case .invalidRecord:
             return "저장된 할 일 정보를 읽을 수 없어요."
         case .database(let message):
@@ -103,7 +109,8 @@ final class TodoStore: @unchecked Sendable {
         return try withTransaction(readOnly: true) {
             TodoSnapshot(
                 tasks: try readTasks(sql: orderedColumns, dayRange: dayRange),
-                stickyNotes: try readStickyNotes(dayRange: dayRange)
+                stickyNotes: try readStickyNotes(dayRange: dayRange),
+                stickyNoteDefaultFontSize: try readDefaultStickyFontSize()
             )
         }
     }
@@ -240,14 +247,65 @@ final class TodoStore: @unchecked Sendable {
         try finishWrite(statement)
     }
 
+    func saveStickySize(id: UUID, size: StickyNoteSize) throws {
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else {
+            throw TodoStoreError.invalidSize
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        let statement = try prepare("UPDATE sticky_notes SET width = ?, height = ? WHERE todo_id = ?")
+        defer { sqlite3_finalize(statement) }
+        try check(sqlite3_bind_double(statement, 1, size.width))
+        try check(sqlite3_bind_double(statement, 2, size.height))
+        try bind(id.uuidString, to: statement, at: 3)
+        try finishWrite(statement)
+    }
+
+    func saveStickyFontSize(id: UUID, fontSize: Double?) throws {
+        if let fontSize { try validateFontSize(fontSize) }
+        lock.lock()
+        defer { lock.unlock() }
+        let statement = try prepare("UPDATE sticky_notes SET font_size = ? WHERE todo_id = ?")
+        defer { sqlite3_finalize(statement) }
+        if let fontSize {
+            try check(sqlite3_bind_double(statement, 1, fontSize))
+        } else {
+            try check(sqlite3_bind_null(statement, 1))
+        }
+        try bind(id.uuidString, to: statement, at: 2)
+        try finishWrite(statement)
+    }
+
+    func saveDefaultStickyFontSize(_ fontSize: Double) throws {
+        try validateFontSize(fontSize)
+        lock.lock()
+        defer { lock.unlock() }
+        let statement = try prepare("""
+            INSERT INTO app_settings (key, value) VALUES ('sticky_font_size', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """)
+        defer { sqlite3_finalize(statement) }
+        try check(sqlite3_bind_double(statement, 1, fontSize))
+        try finishWrite(statement)
+    }
+
     private func configureSchema() throws {
         try withTransaction(readOnly: false) {
+            let fontSizeColumn = """
+                font_size REAL
+                    CHECK (font_size >= \(StickyNoteTypography.minimumFontSize)
+                        AND font_size <= \(StickyNoteTypography.maximumFontSize))
+                """
             try execute("""
                 CREATE TABLE IF NOT EXISTS todos (
                     id TEXT PRIMARY KEY NOT NULL,
                     title TEXT NOT NULL,
                     created_at REAL NOT NULL,
                     completed_at REAL
+                );
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value REAL NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS sticky_notes (
                     todo_id TEXT PRIMARY KEY NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
@@ -256,6 +314,9 @@ final class TodoStore: @unchecked Sendable {
                     position_x REAL,
                     position_y REAL,
                     display_id TEXT,
+                    width REAL CHECK (width > 0),
+                    height REAL CHECK (height > 0),
+                    \(fontSizeColumn),
                     CHECK ((position_x IS NULL AND position_y IS NULL)
                         OR (position_x IS NOT NULL AND position_y IS NOT NULL))
                 );
@@ -270,7 +331,27 @@ final class TodoStore: @unchecked Sendable {
                     DELETE FROM sticky_notes WHERE todo_id = OLD.id;
                 END;
                 """)
+            let columns = try stickyNoteColumns()
+            for column in ["width", "height"] where !columns.contains(column) {
+                try execute("ALTER TABLE sticky_notes ADD COLUMN \(column) REAL CHECK (\(column) > 0)")
+            }
+            if !columns.contains("font_size") {
+                try execute("ALTER TABLE sticky_notes ADD COLUMN \(fontSizeColumn)")
+            }
         }
+    }
+
+    private func stickyNoteColumns() throws -> Set<String> {
+        let statement = try prepare("PRAGMA table_info(sticky_notes)")
+        defer { sqlite3_finalize(statement) }
+        var columns = Set<String>()
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            columns.insert(stringColumn(statement, index: 1))
+            result = sqlite3_step(statement)
+        }
+        guard result == SQLITE_DONE else { throw databaseError() }
+        return columns
     }
 
     private func updateStickyNotes(ids: [UUID], sql: String) throws {
@@ -289,7 +370,7 @@ final class TodoStore: @unchecked Sendable {
 
     private func readStickyNotes(dayRange: DateInterval?) throws -> [StickyNoteState] {
         let statement = try prepare("""
-            SELECT todo_id, is_visible, is_always_on_top, position_x, position_y, display_id
+            SELECT todo_id, is_visible, is_always_on_top, position_x, position_y, display_id, width, height, font_size
             FROM sticky_notes JOIN todos ON todos.id = sticky_notes.todo_id
             \(dayFilter)
             ORDER BY todo_id
@@ -315,16 +396,60 @@ final class TodoStore: @unchecked Sendable {
                         ? nil : stringColumn(statement, index: 5)
                 )
             }
+            var size: StickyNoteSize?
+            if sqlite3_column_type(statement, 6) != SQLITE_NULL || sqlite3_column_type(statement, 7) != SQLITE_NULL {
+                let width = sqlite3_column_double(statement, 6)
+                let height = sqlite3_column_double(statement, 7)
+                guard width.isFinite, height.isFinite, width > 0, height > 0 else {
+                    throw TodoStoreError.invalidRecord
+                }
+                size = StickyNoteSize(width: width, height: height)
+            }
+            var fontSize: Double?
+            if sqlite3_column_type(statement, 8) != SQLITE_NULL {
+                let savedFontSize = sqlite3_column_double(statement, 8)
+                do {
+                    try validateFontSize(savedFontSize)
+                } catch {
+                    throw TodoStoreError.invalidRecord
+                }
+                fontSize = savedFontSize
+            }
             notes.append(StickyNoteState(
                 id: id,
                 isVisible: sqlite3_column_int(statement, 1) != 0,
                 isAlwaysOnTop: sqlite3_column_int(statement, 2) != 0,
-                position: position
+                position: position,
+                size: size,
+                fontSize: fontSize
             ))
             result = sqlite3_step(statement)
         }
         guard result == SQLITE_DONE else { throw databaseError() }
         return notes
+    }
+
+    private func readDefaultStickyFontSize() throws -> Double {
+        let statement = try prepare("SELECT value FROM app_settings WHERE key = 'sticky_font_size'")
+        defer { sqlite3_finalize(statement) }
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE { return StickyNoteTypography.defaultFontSize }
+        guard result == SQLITE_ROW else { throw databaseError() }
+        let fontSize = sqlite3_column_double(statement, 0)
+        do {
+            try validateFontSize(fontSize)
+        } catch {
+            throw TodoStoreError.invalidRecord
+        }
+        return fontSize
+    }
+
+    private func validateFontSize(_ fontSize: Double) throws {
+        guard fontSize.isFinite,
+              fontSize >= StickyNoteTypography.minimumFontSize,
+              fontSize <= StickyNoteTypography.maximumFontSize else {
+            throw TodoStoreError.invalidFontSize
+        }
     }
 
     private func withTransaction<Value>(readOnly: Bool, _ operation: () throws -> Value) throws -> Value {

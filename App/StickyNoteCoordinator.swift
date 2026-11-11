@@ -2,16 +2,21 @@ import AppKit
 import Combine
 import SwiftUI
 
+private struct StickyNoteGeometry: Equatable {
+    let position: StickyNotePosition
+    let size: StickyNoteSize
+}
+
 @MainActor
 final class StickyNoteCoordinator: NSObject {
     private let model: TodoListModel
     private var windows: [UUID: StickyNoteWindowController] = [:]
     private var snapshotSubscription: AnyCancellable?
-    private var pendingPositions: [UUID: StickyNotePosition] = [:]
-    // Covers an immediate hide/show while the last position write is still in flight.
-    private var lastKnownPositions: [UUID: StickyNotePosition] = [:]
-    private var positionDebounce: Task<Void, Never>?
-    private var positionWrites: Task<Void, Never>?
+    private var pendingGeometry: [UUID: StickyNoteGeometry] = [:]
+    // Covers an immediate hide/show while a final drag or resize write is still in flight.
+    private var lastKnownGeometry: [UUID: StickyNoteGeometry] = [:]
+    private var geometryDebounce: Task<Void, Never>?
+    private var geometryWrites: Task<Void, Never>?
     private var writeGeneration = 0
     private var nextCascadeIndex = 0
 
@@ -32,32 +37,32 @@ final class StickyNoteCoordinator: NSObject {
         NotificationCenter.default.removeObserver(self)
     }
 
-    /// Includes writes already submitted to the repository, so quitting cannot discard a final drag.
+    /// Includes submitted writes, so quitting cannot discard a final drag or resize.
     func flushPositions() async {
-        positionDebounce?.cancel()
-        positionDebounce = nil
-        enqueuePositionWrites()
-        await positionWrites?.value
+        geometryDebounce?.cancel()
+        geometryDebounce = nil
+        enqueueGeometryWrites()
+        await geometryWrites?.value
     }
 
     private func reconcile(_ snapshot: TodoSnapshot) {
         let tasks = Dictionary(uniqueKeysWithValues: snapshot.tasks.map { ($0.id, $0) })
-        lastKnownPositions = lastKnownPositions.filter { tasks[$0.key] != nil }
+        lastKnownGeometry = lastKnownGeometry.filter { tasks[$0.key] != nil }
         let shownNotes = snapshot.stickyNotes.filter { $0.isVisible && tasks[$0.id]?.isCompleted == false }
         let shownIDs = Set(shownNotes.map(\.id))
 
         for id in Array(windows.keys) where !shownIDs.contains(id) {
             guard let controller = windows.removeValue(forKey: id) else { continue }
             if tasks[id] != nil {
-                pendingPositions[id] = controller.currentPosition
-                lastKnownPositions[id] = controller.currentPosition
+                pendingGeometry[id] = controller.currentGeometry
+                lastKnownGeometry[id] = controller.currentGeometry
             } else {
-                pendingPositions.removeValue(forKey: id)
+                pendingGeometry.removeValue(forKey: id)
             }
             controller.discard()
         }
-        // Hiding a window flushes its final position instead of waiting for a drag timer.
-        enqueuePositionWrites()
+        // Hiding flushes final geometry instead of waiting for the drag/resize timer.
+        enqueueGeometryWrites()
 
         let screens = currentScreens()
         for note in shownNotes {
@@ -67,11 +72,13 @@ final class StickyNoteCoordinator: NSObject {
                 continue
             }
             let controller = StickyNoteWindowController(model: model, task: task, note: note)
-            let savedPosition = lastKnownPositions[note.id] ?? note.position
+            let savedPosition = lastKnownGeometry[note.id]?.position ?? note.position
+            let savedSize = lastKnownGeometry[note.id]?.size ?? note.size
             guard let placement = StickyNoteLayout.placement(
                 savedOrigin: savedPosition.map { CGPoint(x: $0.x, y: $0.y) },
                 displayID: savedPosition?.displayID,
-                size: controller.preferredFrameSize,
+                size: savedSize.map { CGSize(width: $0.width, height: $0.height) }
+                    ?? StickyNoteLayout.defaultSize,
                 cascadeIndex: nextCascadeIndex,
                 screens: screens
             ) else {
@@ -80,12 +87,15 @@ final class StickyNoteCoordinator: NSObject {
             }
             nextCascadeIndex = (nextCascadeIndex + 1) % 8
             controller.move(to: placement)
-            controller.onMove = { [weak self] position in self?.schedulePosition(position, for: note.id) }
+            controller.onGeometryChange = { [weak self] geometry in
+                self?.scheduleGeometry(geometry, for: note.id)
+            }
             controller.onHide = { [weak self] in self?.hide(note.id) }
             windows[note.id] = controller
             controller.show()
-            if note.position != controller.currentPosition {
-                schedulePosition(controller.currentPosition, for: note.id)
+            let geometry = controller.currentGeometry
+            if note.position != geometry.position || note.size != geometry.size {
+                scheduleGeometry(geometry, for: note.id)
             }
         }
     }
@@ -102,32 +112,33 @@ final class StickyNoteCoordinator: NSObject {
         }
     }
 
-    private func schedulePosition(_ position: StickyNotePosition, for id: UUID) {
-        pendingPositions[id] = position
-        lastKnownPositions[id] = position
-        positionDebounce?.cancel()
-        positionDebounce = Task { [weak self] in
+    private func scheduleGeometry(_ geometry: StickyNoteGeometry, for id: UUID) {
+        pendingGeometry[id] = geometry
+        lastKnownGeometry[id] = geometry
+        geometryDebounce?.cancel()
+        geometryDebounce = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
             guard let self, !Task.isCancelled else { return }
-            positionDebounce = nil
+            geometryDebounce = nil
             await flushPositions()
         }
     }
 
-    private func enqueuePositionWrites() {
-        guard !pendingPositions.isEmpty else { return }
-        let positions = pendingPositions
-        pendingPositions.removeAll()
-        let precedingWrite = positionWrites
+    private func enqueueGeometryWrites() {
+        guard !pendingGeometry.isEmpty else { return }
+        let geometries = pendingGeometry
+        pendingGeometry.removeAll()
+        let precedingWrite = geometryWrites
         writeGeneration += 1
         let generation = writeGeneration
         let model = model
-        positionWrites = Task { [weak self] in
+        geometryWrites = Task { [weak self] in
             await precedingWrite?.value
-            for (id, position) in positions {
-                await model.saveStickyPosition(id: id, position: position)
+            for (id, geometry) in geometries {
+                await model.saveStickyPosition(id: id, position: geometry.position)
+                await model.saveStickySize(id: id, size: geometry.size)
             }
-            if let self, writeGeneration == generation { positionWrites = nil }
+            if let self, writeGeneration == generation { geometryWrites = nil }
         }
     }
 
@@ -135,15 +146,16 @@ final class StickyNoteCoordinator: NSObject {
         let screens = currentScreens()
         guard !screens.isEmpty else { return }
         for (id, controller) in windows {
-            let position = controller.currentPosition
+            let geometry = controller.currentGeometry
+            let position = geometry.position
             guard let placement = StickyNoteLayout.placement(
                 savedOrigin: CGPoint(x: position.x, y: position.y),
                 displayID: position.displayID,
-                size: controller.preferredFrameSize,
+                size: CGSize(width: geometry.size.width, height: geometry.size.height),
                 screens: screens
             ) else { continue }
             controller.move(to: placement)
-            schedulePosition(controller.currentPosition, for: id)
+            scheduleGeometry(controller.currentGeometry, for: id)
         }
         // A display can become available after launch had no valid screen yet.
         reconcile(model.snapshot)
@@ -165,6 +177,24 @@ final class StickyNoteCoordinator: NSObject {
 private final class StickyNotePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func performClose(_ sender: Any?) {
+        // The native action can ignore a hidden close button. Keep menu/keyboard
+        // closing on the same persisted hide path as the note's custom button.
+        guard delegate?.windowShouldClose?(self) ?? true else { return }
+        close()
+    }
+
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(NSWindow.performClose(_:)) { return isVisible }
+        return super.validateMenuItem(menuItem)
+    }
+
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        // Native validation also checks the standard button, which this panel hides.
+        if item.action == #selector(NSWindow.performClose(_:)) { return isVisible }
+        return super.validateUserInterfaceItem(item)
+    }
 }
 
 @MainActor
@@ -172,19 +202,21 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
     private let model: TodoListModel
     private var task: TodoItem
     private var note: StickyNoteState
-    private var suppressMove = false
+    private var suppressGeometryChanges = false
     private var placementDisplayID: String?
     private var hostingView: NSHostingView<StickyNoteView>?
     private var isRegisteredInWindowMenu = false
-    let preferredFrameSize: CGSize
-    var onMove: ((StickyNotePosition) -> Void)?
+    var onGeometryChange: ((StickyNoteGeometry) -> Void)?
     var onHide: (() -> Void)?
 
-    var currentPosition: StickyNotePosition {
+    var currentGeometry: StickyNoteGeometry {
         let frame = window?.frame ?? .zero
-        return StickyNotePosition(
-            x: Double(frame.origin.x), y: Double(frame.origin.y),
-            displayID: window?.screen.map(Self.displayID) ?? placementDisplayID
+        return StickyNoteGeometry(
+            position: StickyNotePosition(
+                x: Double(frame.origin.x), y: Double(frame.origin.y),
+                displayID: window?.screen.map(Self.displayID) ?? placementDisplayID
+            ),
+            size: StickyNoteSize(width: Double(frame.width), height: Double(frame.height))
         )
     }
 
@@ -193,17 +225,24 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
         self.task = task
         self.note = note
         let panel = StickyNotePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 168),
-            styleMask: [.titled, .closable, .nonactivatingPanel],
+            contentRect: NSRect(origin: .zero, size: StickyNoteLayout.defaultSize),
+            styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered, defer: false
         )
-        preferredFrameSize = panel.frame.size
         super.init(window: panel)
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = false
         panel.isExcludedFromWindowsMenu = false
+        panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
+        panel.titlebarSeparatorStyle = .none
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.backgroundColor = StickyNoteAppearance.background
+        panel.minSize = StickyNoteLayout.minimumSize
+        panel.tabbingMode = .disallowed
         panel.isMovableByWindowBackground = false
         panel.hasShadow = true
         panel.delegate = self
@@ -213,7 +252,9 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
     required init?(coder: NSCoder) { nil }
 
     func update(task: TodoItem, note: StickyNoteState) {
-        let contentChanged = self.task != task || self.note.isAlwaysOnTop != note.isAlwaysOnTop
+        let contentChanged = self.task != task
+            || self.note.isAlwaysOnTop != note.isAlwaysOnTop
+            || self.note.fontSize != note.fontSize
         let behaviorChanged = hostingView == nil || self.note.isAlwaysOnTop != note.isAlwaysOnTop
         self.task = task
         self.note = note
@@ -240,6 +281,10 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
             hostingView.rootView = content
         } else {
             let hostingView = NSHostingView(rootView: content)
+            // Keep the custom drag strip in the transparent titlebar and let native
+            // edge resizing determine the frame instead of the text's ideal size.
+            hostingView.safeAreaRegions = []
+            hostingView.sizingOptions = []
             self.hostingView = hostingView
             panel.contentView = hostingView
         }
@@ -256,14 +301,19 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
     func bringForward() { window?.makeKeyAndOrderFront(nil) }
 
     func move(to placement: StickyNoteLayout.Placement) {
-        suppressMove = true
+        suppressGeometryChanges = true
         placementDisplayID = placement.displayID
+        // A newly connected display may be smaller than the normal minimum.
+        window?.minSize = CGSize(
+            width: min(StickyNoteLayout.minimumSize.width, placement.frame.width),
+            height: min(StickyNoteLayout.minimumSize.height, placement.frame.height)
+        )
         window?.setFrame(placement.frame, display: true)
-        suppressMove = false
+        suppressGeometryChanges = false
     }
 
     func discard() {
-        onMove = nil
+        onGeometryChange = nil
         onHide = nil
         if let window { NSApp.removeWindowsItem(window) }
         isRegisteredInWindowMenu = false
@@ -274,8 +324,20 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
     }
 
     func windowDidMove(_ notification: Notification) {
-        guard !suppressMove else { return }
-        onMove?(currentPosition)
+        geometryDidChange()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        geometryDidChange()
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        geometryDidChange()
+    }
+
+    private func geometryDidChange() {
+        guard !suppressGeometryChanges else { return }
+        onGeometryChange?(currentGeometry)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

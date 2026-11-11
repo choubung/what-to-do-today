@@ -84,6 +84,35 @@ private enum TodoListModelTests {
         precondition(concurrentTasks.allSatisfy { task in
             model.completedTasks.contains { $0.id == task.id }
         })
+
+        try store.showStickyNotes(ids: [first.id])
+        await model.refresh()
+        await model.setStickyFontSize(id: first.id, fontSize: 24)
+        precondition(sqlite3_exec(lockConnection, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK)
+        var preferenceStarted = false
+        let preferenceWrite = Task {
+            preferenceStarted = true
+            await model.setDefaultStickyFontSize(22)
+        }
+        while !preferenceStarted { await Task.yield() }
+        beganWaiting = false
+        finishedWaiting = false
+        let appearanceWait = Task {
+            beganWaiting = true
+            await model.waitForPendingSave()
+            finishedWaiting = true
+        }
+        while !beganWaiting { await Task.yield() }
+        precondition(!model.isSaving && !finishedWaiting, "Font preferences must save without locking the list, and quit must wait")
+        precondition(sqlite3_exec(lockConnection, "COMMIT", nil, nil, nil) == SQLITE_OK)
+        await preferenceWrite.value
+        await appearanceWait.value
+        precondition(model.defaultStickyFontSize == 22)
+        let overridden = model.stickyNotes.first { $0.id == first.id }!
+        precondition(model.effectiveStickyFontSize(for: overridden) == 24)
+        await model.setStickyFontSize(id: first.id, fontSize: nil)
+        let inherited = model.stickyNotes.first { $0.id == first.id }!
+        precondition(model.effectiveStickyFontSize(for: inherited) == 22)
         withExtendedLifetime(subscription) {}
         print("TodoListModelTests passed")
     }

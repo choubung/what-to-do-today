@@ -53,6 +53,18 @@ private actor TodoRepository {
     func saveStickyPosition(id: UUID, position: StickyNotePosition) throws {
         try connection().saveStickyPosition(id: id, position: position)
     }
+
+    func saveStickySize(id: UUID, size: StickyNoteSize) throws {
+        try connection().saveStickySize(id: id, size: size)
+    }
+
+    func saveStickyFontSize(id: UUID, fontSize: Double?) throws {
+        try connection().saveStickyFontSize(id: id, fontSize: fontSize)
+    }
+
+    func saveDefaultStickyFontSize(_ fontSize: Double) throws {
+        try connection().saveDefaultStickyFontSize(fontSize)
+    }
 }
 
 @MainActor
@@ -69,8 +81,11 @@ final class TodoListModel: ObservableObject {
     private var observer: NSObjectProtocol?
     private var refreshTask: Task<Void, Never>?
     private var refreshRequested = false
+    private var pendingPreferenceSaves = 0
     private var saveWaiters: [CheckedContinuation<Void, Never>] = []
     private static let positionErrorMessage = "포스트잇 위치를 저장하지 못했어요. 다시 이동해 주세요."
+    private static let sizeErrorMessage = "포스트잇 크기를 저장하지 못했어요. 다시 조정해 주세요."
+    private static let fontErrorMessage = "글자 크기를 저장하지 못했어요. 다시 조정해 주세요."
 
     var onShowStickyNotes: (([UUID]) -> Void)?
 
@@ -79,6 +94,11 @@ final class TodoListModel: ObservableObject {
     var incompleteTasks: [TodoItem] { tasks.filter { !$0.isCompleted } }
     var completedTasks: [TodoItem] { tasks.filter(\.isCompleted) }
     var visibleStickyCount: Int { stickyNotes.filter(\.isVisible).count }
+    var defaultStickyFontSize: Double { snapshot.stickyNoteDefaultFontSize }
+
+    func effectiveStickyFontSize(for note: StickyNoteState) -> Double {
+        note.fontSize ?? defaultStickyFontSize
+    }
 
     func isStickyVisible(for id: UUID) -> Bool {
         stickyNotes.contains { $0.id == id && $0.isVisible }
@@ -199,9 +219,46 @@ final class TodoListModel: ObservableObject {
     }
 
     func waitForPendingSave() async {
-        guard isSaving || !pendingCompletions.isEmpty else { return }
+        guard isSaving || !pendingCompletions.isEmpty || pendingPreferenceSaves > 0 else { return }
         await withCheckedContinuation { continuation in
             saveWaiters.append(continuation)
+        }
+    }
+
+    func saveStickySize(id: UUID, size: StickyNoteSize) async {
+        do {
+            try await repository.saveStickySize(id: id, size: size)
+            if errorMessage == Self.sizeErrorMessage { errorMessage = nil }
+        } catch {
+            errorMessage = Self.sizeErrorMessage
+        }
+    }
+
+    func setStickyFontSize(id: UUID, fontSize: Double?) async {
+        await saveStickyAppearance {
+            try await self.repository.saveStickyFontSize(id: id, fontSize: fontSize)
+        }
+    }
+
+    func setDefaultStickyFontSize(_ fontSize: Double) async {
+        await saveStickyAppearance {
+            try await self.repository.saveDefaultStickyFontSize(fontSize)
+        }
+    }
+
+    private func saveStickyAppearance(_ operation: () async throws -> Void) async {
+        pendingPreferenceSaves += 1
+        defer {
+            pendingPreferenceSaves -= 1
+            resumeSaveWaitersIfIdle()
+        }
+        do {
+            try await operation()
+            if errorMessage == Self.fontErrorMessage { errorMessage = nil }
+            notifyChange(reloadWidgets: false)
+            await refresh()
+        } catch {
+            errorMessage = Self.fontErrorMessage
         }
     }
 
@@ -240,7 +297,7 @@ final class TodoListModel: ObservableObject {
     }
 
     private func resumeSaveWaitersIfIdle() {
-        guard !isSaving, pendingCompletions.isEmpty else { return }
+        guard !isSaving, pendingCompletions.isEmpty, pendingPreferenceSaves == 0 else { return }
         let waiters = saveWaiters
         saveWaiters.removeAll()
         for waiter in waiters { waiter.resume() }

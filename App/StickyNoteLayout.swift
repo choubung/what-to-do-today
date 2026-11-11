@@ -3,6 +3,9 @@ import CoreGraphics
 
 /// Screen geometry is separate from AppKit so display changes can be tested without hardware.
 enum StickyNoteLayout {
+    static let defaultSize = CGSize(width: 280, height: 190)
+    static let minimumSize = CGSize(width: 240, height: 160)
+
     struct Screen: Equatable {
         let id: String
         let visibleFrame: CGRect
@@ -29,7 +32,11 @@ enum StickyNoteLayout {
         let origin = savedOrigin.flatMap { point in
             point.x.isFinite && point.y.isFinite ? point : nil
         }
-        let proposed = CGRect(origin: origin ?? .zero, size: size)
+        let usableSize = CGSize(
+            width: max(size.width, minimumSize.width),
+            height: max(size.height, minimumSize.height)
+        )
+        let proposed = CGRect(origin: origin ?? .zero, size: usableSize)
         let screen: Screen
         if let preferred = screens.first(where: { $0.id == displayID }) {
             screen = preferred
@@ -44,8 +51,8 @@ enum StickyNoteLayout {
 
         let visible = screen.visibleFrame
         let fittedSize = CGSize(
-            width: min(size.width, visible.width),
-            height: min(size.height, visible.height)
+            width: min(usableSize.width, visible.width),
+            height: min(usableSize.height, visible.height)
         )
         let offset = CGFloat(max(0, cascadeIndex) % 8) * 22
         let desired = origin ?? CGPoint(

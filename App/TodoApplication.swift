@@ -85,6 +85,10 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         Task { _ = await model.hideAllStickyNotes() }
     }
 
+    @objc private func closeKeyWindow(_ sender: Any?) {
+        (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(sender)
+    }
+
     private func configureDateTracking() {
         for name in [Notification.Name.NSCalendarDayChanged, .NSSystemTimeZoneDidChange, .NSSystemClockDidChange] {
             NotificationCenter.default.addObserver(
@@ -193,7 +197,8 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         hideNotesItem.target = self
         fileMenu.addItem(hideNotesItem)
         fileMenu.addItem(.separator())
-        fileMenu.addItem(withTitle: "창 닫기", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let closeItem = fileMenu.addItem(withTitle: "창 닫기", action: #selector(closeKeyWindow(_:)), keyEquivalent: "w")
+        closeItem.target = self
         fileItem.submenu = fileMenu
         menu.addItem(fileItem)
 
