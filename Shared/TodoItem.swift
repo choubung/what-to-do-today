@@ -17,19 +17,41 @@ struct TodoCategory: Identifiable, Equatable, Sendable {
     static let maximumNameLength = 30
 }
 
+/// A Gregorian calendar date in the Mac's local time zone, without a time of day.
+enum TodoPlannedDay {
+    private static var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .autoupdatingCurrent
+        return calendar
+    }
+
+    static func key(for date: Date) -> Int {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return components.year! * 10_000 + components.month! * 100 + components.day!
+    }
+
+    static func date(for key: Int) -> Date? {
+        calendar.date(from: DateComponents(
+            year: key / 10_000, month: key / 100 % 100, day: key % 100, hour: 12
+        ))
+    }
+}
+
 struct TodoItem: Identifiable, Equatable, Sendable {
     let id: UUID
     let title: String
     let createdAt: Date
     let completedAt: Date?
     let categoryID: UUID?
+    let plannedDay: Int?
 
-    init(id: UUID, title: String, createdAt: Date, completedAt: Date?, categoryID: UUID? = nil) {
+    init(id: UUID, title: String, createdAt: Date, completedAt: Date?, categoryID: UUID? = nil, plannedDay: Int? = nil) {
         self.id = id
         self.title = title
         self.createdAt = createdAt
         self.completedAt = completedAt
         self.categoryID = categoryID
+        self.plannedDay = plannedDay
     }
 
     var isCompleted: Bool { completedAt != nil }
