@@ -124,7 +124,40 @@ private enum TaskStoreTests {
         try expect(largePage.pageCount == 1 && largePage.tasks.count == 161, "Large page sizes must not overflow")
         try testStickyNotePersistence(in: directory)
         try testStickyNoteConcurrency(in: directory)
+        try testAddTaskWithStickyNote(in: directory)
         print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, concurrency, and sticky-note migration/state tests.")
+    }
+
+    private static func testAddTaskWithStickyNote(in directory: URL) throws {
+        let url = directory.appendingPathComponent("add-with-sticky.sqlite")
+        let store = try TodoStore(databaseURL: url)
+        let defaultTask = try store.addTask(title: "기본 추가")
+        let listOnlyTask = try store.addTask(title: "목록에 추가", showAsStickyNote: false)
+        let listOnlySnapshot = try store.fetchSnapshot()
+        try expect(Set(listOnlySnapshot.tasks.map(\.id)) == [defaultTask.id, listOnlyTask.id], "Default and explicit false must both create tasks")
+        try expect(listOnlySnapshot.stickyNotes.isEmpty, "Default and explicit false must leave sticky notes empty")
+
+        let noteTask = try store.addTask(title: "  포스트잇으로 추가  ", showAsStickyNote: true)
+        let saved = try store.fetchSnapshot()
+        try expect(noteTask.title == "포스트잇으로 추가" && !noteTask.isCompleted, "Adding as a sticky note must preserve title validation and incomplete state")
+        let savedTask = saved.tasks.first { $0.id == noteTask.id }
+        try expect(savedTask?.title == noteTask.title && savedTask?.isCompleted == false, "The sticky note must refer to the newly saved task")
+        try expect(saved.stickyNotes == [StickyNoteState(id: noteTask.id, isVisible: true, isAlwaysOnTop: false, position: nil)], "A new sticky note must be visible with default position and pinning")
+        try expect(try TodoStore(databaseURL: url).fetchSnapshot() == saved, "Task and sticky state must both survive reopening")
+
+        try executeLegacySQL("""
+            CREATE TRIGGER reject_new_sticky_note BEFORE INSERT ON sticky_notes
+            BEGIN SELECT RAISE(ABORT, 'test sticky insert failure'); END;
+            """, at: url)
+        do {
+            try store.addTask(title: "저장 실패 검증", showAsStickyNote: true)
+            throw TestFailure(description: "Injected sticky insertion failure did not fail")
+        } catch TodoStoreError.database {}
+        try expect(try store.fetchSnapshot() == saved, "A failed sticky insertion must also roll back the new task")
+        try executeLegacySQL("DROP TRIGGER reject_new_sticky_note", at: url)
+        let retry = try store.addTask(title: "실패 후 다시 추가", showAsStickyNote: true)
+        let recovered = try store.fetchSnapshot()
+        try expect(recovered.tasks.count == saved.tasks.count + 1 && recovered.stickyNotes.contains { $0.id == retry.id && $0.isVisible }, "The connection must accept a complete task-and-note save after rollback")
     }
 
     private static func testStickyNotePersistence(in directory: URL) throws {

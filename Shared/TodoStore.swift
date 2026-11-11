@@ -117,19 +117,28 @@ final class TodoStore: @unchecked Sendable {
     }
 
     @discardableResult
-    func addTask(title: String) throws -> TodoItem {
+    func addTask(title: String, showAsStickyNote: Bool = false) throws -> TodoItem {
         let title = try validatedTitle(title)
         let task = TodoItem(id: UUID(), title: title, createdAt: Date(), completedAt: nil)
         lock.lock()
         defer { lock.unlock() }
 
-        let statement = try prepare("INSERT INTO todos (id, title, created_at) VALUES (?, ?, ?)")
-        defer { sqlite3_finalize(statement) }
-        try bind(task.id.uuidString, to: statement, at: 1)
-        try bind(task.title, to: statement, at: 2)
-        try check(sqlite3_bind_double(statement, 3, task.createdAt.timeIntervalSince1970))
-        try finishWrite(statement)
-        return task
+        return try withTransaction(readOnly: false) {
+            let statement = try prepare("INSERT INTO todos (id, title, created_at) VALUES (?, ?, ?)")
+            defer { sqlite3_finalize(statement) }
+            try bind(task.id.uuidString, to: statement, at: 1)
+            try bind(task.title, to: statement, at: 2)
+            try check(sqlite3_bind_double(statement, 3, task.createdAt.timeIntervalSince1970))
+            try finishWrite(statement)
+
+            if showAsStickyNote {
+                let note = try prepare("INSERT INTO sticky_notes (todo_id, is_visible) VALUES (?, 1)")
+                defer { sqlite3_finalize(note) }
+                try bind(task.id.uuidString, to: note, at: 1)
+                try finishWrite(note)
+            }
+            return task
+        }
     }
 
     func updateTask(id: UUID, title: String) throws {

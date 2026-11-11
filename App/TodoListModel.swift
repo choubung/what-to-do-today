@@ -16,8 +16,8 @@ private actor TodoRepository {
         try connection().fetchSnapshot()
     }
 
-    func add(title: String) throws {
-        try connection().addTask(title: title)
+    func add(title: String, showAsStickyNote: Bool) throws {
+        try connection().addTask(title: title, showAsStickyNote: showAsStickyNote)
     }
 
     func update(id: UUID, title: String) throws {
@@ -104,8 +104,10 @@ final class TodoListModel: ObservableObject {
         }
     }
 
-    func add(title: String) async -> Bool {
-        await save { try await self.repository.add(title: title) }
+    func add(title: String, showAsStickyNote: Bool = false) async -> Bool {
+        await save {
+            try await self.repository.add(title: title, showAsStickyNote: showAsStickyNote)
+        }
     }
 
     func update(id: UUID, title: String) async -> Bool {
