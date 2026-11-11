@@ -41,15 +41,13 @@ struct TodoPage: Equatable, Sendable {
     let pageSize: Int
     let totalCount: Int
     let pageCount: Int
-    let isHistory: Bool
 
-    init(tasks: [TodoItem], index: Int, pageSize: Int, totalCount: Int, pageCount: Int? = nil, isHistory: Bool = false) {
+    init(tasks: [TodoItem], index: Int, pageSize: Int, totalCount: Int) {
         self.tasks = tasks
         self.index = index
         self.pageSize = pageSize
         self.totalCount = totalCount
-        self.pageCount = pageCount ?? max(1, (totalCount - 1) / pageSize + 1)
-        self.isHistory = isHistory
+        self.pageCount = max(1, (totalCount - 1) / pageSize + 1)
     }
 
     var hasPrevious: Bool { index > 0 }

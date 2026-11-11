@@ -151,23 +151,9 @@ final class TodoStore: @unchecked Sendable {
 
         return try withTransaction(readOnly: true) {
             let count = try taskCount(dayRange: dayRange)
-            // Keep at least one current page, even when only historical completions remain.
-            // A partly filled current page must never borrow rows from the history section.
-            let currentPageCount = max(1, (count - 1) / pageSize + 1)
-            let historyCount = try dayRange.map { try historicalTaskCount(before: $0.start) } ?? 0
-            let historyPageCount = historyCount == 0 ? 0 : (historyCount - 1) / pageSize + 1
-            let pageCount = currentPageCount + historyPageCount
+            // An empty today list still has one page; old history page selections clamp here.
+            let pageCount = max(1, (count - 1) / pageSize + 1)
             let clampedIndex = min(max(0, index), pageCount - 1)
-            if let dayRange, clampedIndex >= currentPageCount {
-                let tasks = try readHistoricalTasks(
-                    before: dayRange.start, pageSize: pageSize,
-                    offset: (clampedIndex - currentPageCount) * pageSize
-                )
-                return TodoPage(
-                    tasks: tasks, index: clampedIndex, pageSize: pageSize,
-                    totalCount: count + historyCount, pageCount: pageCount, isHistory: true
-                )
-            }
             let tasks = try readTasks(
                 sql: orderedColumns + " LIMIT ?3 OFFSET ?4",
                 dayRange: dayRange,
@@ -176,7 +162,7 @@ final class TodoStore: @unchecked Sendable {
             )
             return TodoPage(
                 tasks: tasks, index: clampedIndex, pageSize: pageSize,
-                totalCount: count + historyCount, pageCount: pageCount
+                totalCount: count
             )
         }
     }
@@ -1057,28 +1043,6 @@ final class TodoStore: @unchecked Sendable {
         try bindDayRange(dayRange, to: statement)
         guard sqlite3_step(statement) == SQLITE_ROW else { throw databaseError() }
         return Int(sqlite3_column_int64(statement, 0))
-    }
-
-    private func historicalTaskCount(before date: Date) throws -> Int {
-        let statement = try prepare("SELECT COUNT(*) FROM todos WHERE completed_at < ?1")
-        defer { sqlite3_finalize(statement) }
-        try check(sqlite3_bind_double(statement, 1, date.timeIntervalSince1970))
-        guard sqlite3_step(statement) == SQLITE_ROW else { throw databaseError() }
-        return Int(sqlite3_column_int64(statement, 0))
-    }
-
-    private func readHistoricalTasks(before date: Date, pageSize: Int, offset: Int) throws -> [TodoItem] {
-        let statement = try prepare("""
-            SELECT id, title, created_at, completed_at, category_id FROM todos
-            WHERE completed_at < ?1
-            ORDER BY completed_at DESC, id ASC
-            LIMIT ?2 OFFSET ?3
-            """)
-        defer { sqlite3_finalize(statement) }
-        try check(sqlite3_bind_double(statement, 1, date.timeIntervalSince1970))
-        try check(sqlite3_bind_int64(statement, 2, Int64(pageSize)))
-        try check(sqlite3_bind_int64(statement, 3, Int64(offset)))
-        return try readTaskRows(statement)
     }
 
     private func readTasks(sql: String, dayRange: DateInterval? = nil, pageSize: Int? = nil, offset: Int = 0) throws -> [TodoItem] {

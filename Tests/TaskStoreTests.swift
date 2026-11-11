@@ -160,7 +160,7 @@ private enum TaskStoreTests {
         try testStickyNoteConcurrency(in: directory)
         try testAddTaskWithStickyNote(in: directory)
         try testDayFiltering(in: directory)
-        try testHistoryPagination(in: directory)
+        try testTodayOnlyPagination(in: directory)
         try testCompletionCalendar(in: directory)
         try testStickySizePersistence(in: directory)
         try testStickyFontPersistence(in: directory)
@@ -743,23 +743,23 @@ private enum TaskStoreTests {
             var pagedTasks: [TodoItem] = []
             for index in 0..<2 {
                 let page = try store.fetchPage(index: index, pageSize: 2, dayRange: range)
-                try expect(page.totalCount == expectedIDs.count + 1 && page.pageCount == 3 && !page.isHistory, "Widget pages must count today's rows and past completions separately")
+                try expect(page.totalCount == expectedIDs.count && page.pageCount == 2, "Widget totals and pages must exclude past completions")
                 pagedTasks.append(contentsOf: page.tasks)
             }
             try expect(pagedTasks == snapshot.tasks, "Filtered pagination must match snapshot ordering without gaps or duplicates")
-            let history = try store.fetchPage(index: 99, pageSize: 2, dayRange: range)
-            try expect(history.index == 2 && history.isHistory && history.tasks.map(\.title) == ["어제 완료"], "History follows today's complete pages and excludes future completion dates")
+            let lastPage = try store.fetchPage(index: 99, pageSize: 2, dayRange: range)
+            try expect(lastPage.index == 1 && Set(lastPage.tasks.map(\.id)).isSubset(of: expectedIDs), "Old history page selections must clamp within today")
             let nextDay = calendar.dateInterval(of: .day, for: range.end)!
             let nextSnapshot = try store.fetchSnapshot(dayRange: nextDay)
-            let nextHistory = try store.fetchPage(index: 2, pageSize: 4, dayRange: nextDay)
+            let nextPage = try store.fetchPage(index: 2, pageSize: 4, dayRange: nextDay)
             try expect(nextSnapshot.tasks.count == 6 && !nextSnapshot.tasks.contains { $0.title == "시작 시각 완료" }, "At local midnight yesterday's completions leave the current list")
-            try expect(nextHistory.isHistory && Set(nextHistory.tasks.map(\.title)) == ["어제 완료", "시작 시각 완료", "마지막 순간 완료"], "At local midnight yesterday's completions remain available on separate history pages")
+            try expect(nextPage.index == 1 && nextPage.totalCount == 6 && nextPage.tasks.allSatisfy { !$0.isCompleted || nextDay.contains($0.completedAt!) }, "At local midnight the widget excludes yesterday and clamps its page")
             try expect(try store.fetchTasks().count == fixtures.count, "Today filtering must retain every stored task")
             try expect(try store.fetchSnapshot().tasks.count == fixtures.count, "Unfiltered snapshot callers must retain their previous behavior")
         }
     }
 
-    private static func testHistoryPagination(in directory: URL) throws {
+    private static func testTodayOnlyPagination(in directory: URL) throws {
         let start = Date(timeIntervalSince1970: 1_794_326_400)
         let range = DateInterval(start: start, duration: 86_400)
         for pageSize in [3, 8] {
@@ -786,36 +786,31 @@ private enum TaskStoreTests {
                 }
             }
 
-            let pages = try (0..<4).map { try store.fetchPage(index: $0, pageSize: pageSize, dayRange: range) }
-            try expect(pages.map { $0.tasks.count } == [pageSize, 1, pageSize, 1], "Both widget sizes must leave unused current rows blank before history starts")
-            try expect(pages.map(\.isHistory) == [false, false, true, true], "History must start on the next page, never in the current section")
-            try expect(pages.allSatisfy { $0.pageCount == 4 && $0.totalCount == (pageSize + 1) * 2 }, "All pages must share count and section-aware bounds")
-            try expect(Set(pages.prefix(2).flatMap(\.tasks).map(\.id)) == currentIDs, "Every current task must appear exactly once before history")
-            try expect(Set(pages.suffix(2).flatMap(\.tasks).map(\.id)) == historyIDs, "Every historical completion must appear exactly once after current tasks")
+            let pages = try (0..<2).map { try store.fetchPage(index: $0, pageSize: pageSize, dayRange: range) }
+            try expect(pages.map { $0.tasks.count } == [pageSize, 1], "Both widget sizes paginate only the current list")
+            try expect(pages.allSatisfy { $0.pageCount == 2 && $0.totalCount == pageSize + 1 }, "Historical completions must not affect totals or page bounds")
+            try expect(Set(pages.flatMap(\.tasks).map(\.id)) == currentIDs, "Every current task appears once with no historical rows")
             let hugePage = try store.fetchPage(index: Int.max, pageSize: Int.max, dayRange: range)
-            try expect(hugePage.index == 1 && hugePage.pageCount == 2 && hugePage.isHistory, "Large page sizes still require a separate history page without overflow")
-            try expect(try store.fetchPage(index: -1, pageSize: pageSize, dayRange: range).index == 0, "Negative requests clamp to the first current page")
+            try expect(hugePage.index == 0 && hugePage.pageCount == 1 && hugePage.tasks.count == currentIDs.count, "Large page sizes must not overflow")
+            try expect(try store.fetchPage(index: -1, pageSize: pageSize, dayRange: range).index == 0, "Negative requests clamp to the first page")
+            let stale = try store.fetchPage(index: 99, pageSize: pageSize, dayRange: range)
+            try expect(stale.index == 1 && stale.tasks == pages[1].tasks && !stale.hasNext, "Saved history pages clamp to the last current page")
 
             for id in currentIDs { try store.deleteTask(id: id) }
-            let emptyCurrent = try store.fetchPage(index: 0, pageSize: pageSize, dayRange: range)
-            let firstHistory = try store.fetchPage(index: 1, pageSize: pageSize, dayRange: range)
-            try expect(emptyCurrent.tasks.isEmpty && !emptyCurrent.isHistory && emptyCurrent.hasNext && emptyCurrent.pageCount == 3, "An empty current list must retain its own first page")
-            try expect(firstHistory.isHistory && firstHistory.tasks.count == pageSize, "History begins on page two when today's list is empty")
+            let emptyCurrent = try store.fetchPage(index: 99, pageSize: pageSize, dayRange: range)
+            try expect(emptyCurrent.tasks.isEmpty && emptyCurrent.totalCount == 0 && emptyCurrent.index == 0 && emptyCurrent.pageCount == 1 && !emptyCurrent.hasNext, "History alone leaves one empty widget page")
+            let pastRange = DateInterval(start: start.addingTimeInterval(-86_400), end: start)
+            let calendarTasks = try store.fetchCompletedTasks(in: pastRange)
+            try expect(Set(calendarTasks.map(\.id)) == historyIDs, "Hidden history remains available in the calendar")
 
-            let restored = firstHistory.tasks[0]
+            let restored = calendarTasks[0]
             try store.setCompleted(id: restored.id, completed: false)
             historyIDs.remove(restored.id)
-            let currentAfterUndo = try store.fetchPage(index: 0, pageSize: pageSize, dayRange: range)
-            let historyAfterUndo = try store.fetchPage(index: 99, pageSize: pageSize, dayRange: range)
-            try expect(currentAfterUndo.tasks.map(\.id) == [restored.id] && !currentAfterUndo.isHistory, "Undoing a historical completion returns it to the current list")
-            try expect(historyAfterUndo.index == 1 && historyAfterUndo.pageCount == 2 && Set(historyAfterUndo.tasks.map(\.id)) == historyIDs, "Undo must remove the history row and clamp a stale page selection")
+            let currentAfterUndo = try store.fetchPage(index: 99, pageSize: pageSize, dayRange: range)
+            try expect(currentAfterUndo.tasks.map(\.id) == [restored.id] && currentAfterUndo.index == 0 && currentAfterUndo.totalCount == 1, "Undo in the calendar returns a past task to the widget")
+            try expect(try Set(store.fetchCompletedTasks(in: pastRange).map(\.id)) == historyIDs, "Undo updates history without deleting other records")
+            try expect(try store.fetchTasks().count == pageSize + 1, "Widget filtering must never delete historical records")
 
-            for id in historyIDs { try store.deleteTask(id: id) }
-            let noHistory = try store.fetchPage(index: 99, pageSize: pageSize, dayRange: range)
-            try expect(noHistory.index == 0 && noHistory.pageCount == 1 && !noHistory.isHistory && noHistory.tasks.map(\.id) == [restored.id], "Deleting the last history rows must clamp back to the current page")
-            try store.deleteTask(id: restored.id)
-            let empty = try store.fetchPage(index: 99, pageSize: pageSize, dayRange: range)
-            try expect(empty.index == 0 && empty.pageCount == 1 && empty.tasks.isEmpty && !empty.hasNext, "An empty database has one current page")
         }
     }
 
