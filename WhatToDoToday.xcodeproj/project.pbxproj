@@ -5,6 +5,16 @@
 	};
 	"objectVersion" = 56;
 	"objects" = {
+		"C81C62CE5AD846769BCDE001" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "App/CompletionHistoryView.swift";
+			"sourceTree" = "SOURCE_ROOT";
+		};
+		"C81C62CE5AD846769BCDE002" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "C81C62CE5AD846769BCDE001";
+		};
 		"79898B7E1EF29C692E8FD6FE" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -172,6 +182,7 @@
 		"1C48CE29E4E135EE62951B22" = {
 			"isa" = "PBXGroup";
 			"children" = (
+				"C81C62CE5AD846769BCDE001",
 				"79898B7E1EF29C692E8FD6FE",
 				"EDCE8D5DC9DCA52C3F33E45A",
 				"B21CFB2BD917AD1463D3DF05",
@@ -407,8 +418,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.1.1";
-				"CURRENT_PROJECT_VERSION" = "3";
+				"MARKETING_VERSION" = "1.2";
+				"CURRENT_PROJECT_VERSION" = "4";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "TodoWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
@@ -439,8 +450,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.1.1";
-				"CURRENT_PROJECT_VERSION" = "3";
+				"MARKETING_VERSION" = "1.2";
+				"CURRENT_PROJECT_VERSION" = "4";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "TodoWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
@@ -541,6 +552,7 @@
 			"isa" = "PBXSourcesBuildPhase";
 			"buildActionMask" = 2147483647;
 			"files" = (
+				"C81C62CE5AD846769BCDE002",
 				"C4EED4F21257F245EFC18B51",
 				"2150175E2CBC0F8A31840A56",
 				"6C90732577690474B503F45C",
@@ -585,8 +597,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.1.1";
-				"CURRENT_PROJECT_VERSION" = "3";
+				"MARKETING_VERSION" = "1.2";
+				"CURRENT_PROJECT_VERSION" = "4";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "What to Do Today";
 				"PRODUCT_MODULE_NAME" = "WhatToDoToday";
@@ -615,8 +627,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.1.1";
-				"CURRENT_PROJECT_VERSION" = "3";
+				"MARKETING_VERSION" = "1.2";
+				"CURRENT_PROJECT_VERSION" = "4";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "What to Do Today";
 				"PRODUCT_MODULE_NAME" = "WhatToDoToday";

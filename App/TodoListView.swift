@@ -18,6 +18,7 @@ struct TodoListView: View {
     @State private var showingNewCategory = false
     @State private var categoryMoveNotice: TodoCategory?
     @State private var showingReminderSettings = false
+    @State private var showingCompletionHistory = false
     @State private var reminderTask: TodoItem?
     @FocusState private var isEntryFocused: Bool
     @Environment(\.controlActiveState) private var controlActiveState
@@ -64,6 +65,12 @@ struct TodoListView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button { showingCompletionHistory = true } label: {
+                    Label("이전 완료", systemImage: "calendar")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .disabled(model.isLoading)
                 stickyManagementMenu
                 Button { showingReminderSettings = true } label: {
                     Image(systemName: "bell")
@@ -102,7 +109,7 @@ struct TodoListView: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         taskSection("할 일", tasks: filteredTasks.filter { !$0.isCompleted })
                         taskSection(
-                            "완료", tasks: filteredTasks.filter(\.isCompleted),
+                            "오늘 완료", tasks: filteredTasks.filter(\.isCompleted),
                             topSpacing: filteredTasks.contains { !$0.isCompleted } ? 24 : 0
                         )
                     }
@@ -125,6 +132,9 @@ struct TodoListView: View {
         .sheet(isPresented: $showingNewCategory) {
             TodoCategoryNameEditor(model: model) { id in categoryFilter = .category(id) }
         }
+        .sheet(isPresented: $showingCompletionHistory) {
+            CompletionHistoryView(model: model, initialCategoryID: selectedCategoryID)
+        }
         .sheet(isPresented: $showingReminderSettings) {
             ReminderSettingsView(coordinator: reminders)
         }
@@ -144,7 +154,7 @@ struct TodoListView: View {
             Text(task.title)
         }
         .alert("처리하지 못했어요", isPresented: Binding(
-            get: { model.errorMessage != nil && editingTask == nil && reminderTask == nil && !showingReminderSettings && !showingStickyPicker && !showingCategories && !showingNewCategory && controlActiveState == .key },
+            get: { model.errorMessage != nil && editingTask == nil && reminderTask == nil && !showingReminderSettings && !showingStickyPicker && !showingCategories && !showingNewCategory && !showingCompletionHistory && controlActiveState == .key },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
             Button("다시 불러오기") {
@@ -164,6 +174,10 @@ struct TodoListView: View {
             }
         }
         .onChange(of: categoryFilter) { _, _ in categoryMoveNotice = nil }
+    }
+
+    private var selectedCategoryID: UUID? {
+        if case let .category(id) = categoryFilter { id } else { nil }
     }
 
     private var additionCategory: TodoCategory? {
