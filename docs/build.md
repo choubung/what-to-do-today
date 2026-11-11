@@ -10,10 +10,27 @@ DEVELOPMENT_TEAM = YOUR_TEAM_ID
 
 이 파일은 Git에서 제외됩니다. 공통 `Configuration.xcconfig`가 이를 읽어 앱과 `TodoWidget`의 Debug·Release 빌드에 같은 팀을 적용합니다. Xcode와 명령줄 빌드 모두 이 설정을 사용합니다.
 
-`WhatToDoToday.xcodeproj`를 Xcode에서 열고 `WhatToDoToday` 스킴을 실행합니다. 두 타깃의 Signing & Capabilities에서 자동 서명과 `group.com.choubung.whattodotoday` App Group을 확인합니다. 앱과 위젯은 App Group의 `Tasks.sqlite` 파일을 함께 사용합니다.
+`WhatToDoToday.xcodeproj`를 Xcode에서 열고 `WhatToDoToday` 스킴을 빌드합니다. 두 타깃의 Signing & Capabilities에서 자동 서명과 `group.com.choubung.whattodotoday` App Group을 확인합니다. 앱과 위젯은 App Group의 `Tasks.sqlite` 파일을 함께 사용합니다.
 
+## 설치 및 업데이트
 
-빌드한 앱으로 바탕화면 위젯과 로그인 시 자동 실행을 사용하려면 앱을 `/Applications`로 옮긴 뒤 한 번 실행하세요.
+DMG를 받았다면 열고 **Install What to Do Today.command**를 실행하세요. Xcode에서 빌드했다면 저장소에서 아래 명령을 실행하세요.
+
+```sh
+bash Scripts/install.sh "/path/to/What to Do Today.app"
+```
+
+업데이트 전에는 앱을 `⌘Q`로 종료하세요. 설치 도구는 서명된 앱과 위젯을 `/Applications`에 설치하고 위젯 확장을 등록합니다. 그 경로에서 실행 중인 이전 위젯을 종료한 뒤 앱을 열어 WidgetKit에 갱신을 요청합니다. 앱과 위젯이 사용하는 할 일 저장소는 App Group에 있습니다.
+
+## DMG 만들기
+
+서명된 빌드로 앱과 설치 도구가 들어 있는 DMG를 만듭니다.
+
+```sh
+bash Scripts/build-dmg.sh "/path/to/What to Do Today.app" "./WhatToDoToday.dmg"
+```
+
+다른 Mac에 배포할 때는 Developer ID로 앱과 위젯을 서명하고 DMG를 서명·공증한 뒤 릴리즈에 첨부합니다. [Apple의 Mac 앱 배포 안내](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution)
 
 ## 검증
 
