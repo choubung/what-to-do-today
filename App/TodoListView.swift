@@ -64,6 +64,7 @@ struct TodoListView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 32) {
                         statusSection(completed: false)
+                        statusSection(completed: true)
                         if !model.upcomingTasks.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("예정된 할 일")
@@ -72,7 +73,6 @@ struct TodoListView: View {
                                 taskRows(model.upcomingTasks, upcoming: true)
                             }
                         }
-                        statusSection(completed: true)
                     }
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.completedTasks.map(\.id))
                     .padding(.horizontal, 16)
