@@ -199,6 +199,7 @@ private enum TaskStoreTests {
         let largePage = try appStore.fetchPage(index: 0, pageSize: Int.max)
         try expect(largePage.pageCount == 1 && largePage.tasks.count == 161, "Large page sizes must not overflow")
         try testStickyNotePersistence(in: directory)
+        try testStickyCompletionUndo(in: directory)
         try testStickyNoteConcurrency(in: directory)
         try testAddTaskWithStickyNote(in: directory)
         try testDayFiltering(in: directory)
@@ -1110,6 +1111,69 @@ private enum TaskStoreTests {
         try expect(visible.map(\.id) == [bulkB.id], "Restore must only show eligible notes from the saved group")
         try expect(visible.first?.size == size && visible.first?.position == position, "Restore must preserve each note's size and position")
         try expect(!restoredGroup.canRestoreStickyNotes, "Restoring must consume the saved group")
+    }
+
+    private static func testStickyCompletionUndo(in directory: URL) throws {
+        let url = directory.appendingPathComponent("sticky-completion-undo.sqlite")
+        let store = try TodoStore(databaseURL: url)
+        let task = try store.addTask(title: "포스트잇에서 완료", showAsStickyNote: true)
+        let position = StickyNotePosition(x: 120, y: 240, displayID: "external")
+        let size = StickyNoteSize(width: 132, height: 104)
+        try store.saveStickyPosition(id: task.id, position: position)
+        try store.saveStickySize(id: task.id, size: size)
+        try store.setStickyAlwaysOnTop(id: task.id, value: true)
+        try store.saveStickyColor(id: task.id, colorHex: "#ABCDEF")
+        try store.saveStickyFontSize(id: task.id, fontSize: 21)
+        let original = try store.fetchSnapshot().stickyNotes
+
+        try store.setCompleted(id: task.id, completed: true, fromStickyNote: true)
+        try expect(try store.fetchSnapshot().stickyNotes.first?.isVisible == false, "Sticky completion must hide the note")
+        let completedAt = try store.fetchTasks().first?.completedAt
+        // Reopen as a different process, with retries from both completion paths.
+        let widget = try TodoStore(databaseURL: url)
+        try widget.setCompleted(id: task.id, completed: true)
+        try store.setCompleted(id: task.id, completed: true, fromStickyNote: true)
+        try expect(try store.fetchTasks().first?.completedAt == completedAt, "Retries must preserve the original completion timestamp")
+        try widget.setCompleted(id: task.id, completed: false)
+        try expect(try store.fetchSnapshot().stickyNotes == original, "Undo in another connection must restore the exact saved note state after reopening")
+        try expect(try !store.fetchSnapshot().canRestoreStickyNotes, "Completion undo must not populate the manually hidden group")
+
+        try store.hideStickyNotes(ids: [task.id])
+        try widget.setCompleted(id: task.id, completed: false)
+        try expect(try store.fetchSnapshot().stickyNotes.first?.isVisible == false, "Repeated undo must not reopen a manually hidden note")
+        try store.showStickyNotes(ids: [task.id])
+        try widget.setCompleted(id: task.id, completed: true)
+        try store.setCompleted(id: task.id, completed: true, fromStickyNote: true)
+        try widget.setCompleted(id: task.id, completed: false)
+        try expect(try store.fetchSnapshot().stickyNotes.first?.isVisible == false, "A later generic completion and stale sticky retry must not reuse or create a restoration marker")
+
+        try store.setCompleted(id: task.id, completed: true, fromStickyNote: true)
+        try widget.setCompleted(id: task.id, completed: false)
+        try expect(try store.fetchSnapshot().stickyNotes.first?.isVisible == false, "A completion from an already hidden note must not arm restoration")
+
+        // A failed completion must roll back its restoration marker as well.
+        try store.showStickyNotes(ids: [task.id])
+        try executeLegacySQL("""
+            CREATE TRIGGER reject_completion BEFORE UPDATE OF completed_at ON todos
+            BEGIN SELECT RAISE(ABORT, 'test rollback'); END;
+            """, at: url)
+        do {
+            try store.setCompleted(id: task.id, completed: true, fromStickyNote: true)
+            throw TestFailure(description: "Injected completion failure did not fail")
+        } catch TodoStoreError.database {}
+        try expect(try store.fetchSnapshot().stickyNotes == original, "Failed completion must leave the note visible")
+        try executeLegacySQL("DROP TRIGGER reject_completion", at: url)
+        try widget.setCompleted(id: task.id, completed: true)
+        try widget.setCompleted(id: task.id, completed: false)
+        try expect(try store.fetchSnapshot().stickyNotes.first?.isVisible == false, "Failed completion must not leave a marker for a later generic completion")
+
+        try store.showStickyNotes(ids: [task.id])
+        try store.setCompleted(id: task.id, completed: true, fromStickyNote: true)
+        try executeLegacySQL("UPDATE todos SET completed_at = NULL WHERE id = '\(task.id.uuidString)'", at: url)
+        try expect(try store.fetchSnapshot().stickyNotes == original, "Legacy undo writers must also restore sticky-origin completions")
+        try store.setCompleted(id: task.id, completed: true, fromStickyNote: true)
+        try store.deleteTask(id: task.id)
+        try expect(try widget.fetchSnapshot().stickyNotes.isEmpty, "Deleting a completed task must discard its sticky restoration state")
     }
 
     private static func testStickyNoteConcurrency(in directory: URL) throws {

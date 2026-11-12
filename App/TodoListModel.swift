@@ -70,8 +70,8 @@ private actor TodoRepository {
         try connection().markRemindersDelivered(generations: generations, at: date)
     }
 
-    func setCompleted(id: UUID, completed: Bool) throws {
-        try connection().setCompleted(id: id, completed: completed)
+    func setCompleted(id: UUID, completed: Bool, fromStickyNote: Bool = false) throws {
+        try connection().setCompleted(id: id, completed: completed, fromStickyNote: fromStickyNote)
     }
 
     func delete(id: UUID) throws {
@@ -294,7 +294,7 @@ final class TodoListModel: ObservableObject {
     }
 
     @discardableResult
-    func setCompleted(_ task: TodoItem, completed: Bool) async -> Bool {
+    func setCompleted(_ task: TodoItem, completed: Bool, fromStickyNote: Bool = false) async -> Bool {
         guard !isSaving, !isCompleting(task.id) else { return false }
         pendingCompletions[task.id] = completed
         if errorMessage != nil { errorMessage = nil }
@@ -303,7 +303,7 @@ final class TodoListModel: ObservableObject {
             resumeSaveWaitersIfIdle()
         }
         do {
-            try await repository.setCompleted(id: task.id, completed: completed)
+            try await repository.setCompleted(id: task.id, completed: completed, fromStickyNote: fromStickyNote)
             notifyChange(reloadWidgets: true)
             await refresh()
             return true
