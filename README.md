@@ -34,10 +34,12 @@
     <th align="left">대형 · 한 페이지에 8개</th>
   </tr>
   <tr>
-    <td valign="top"><img src="docs/images/widget-preview.png" width="320" alt="할 일 3개와 이전·다음 페이지 버튼이 보이는 중형 위젯"></td>
-    <td valign="top"><img src="docs/images/widget-large-preview.png" width="320" alt="할 일 8개와 이전·다음 페이지 버튼이 보이는 대형 위젯"></td>
+    <td valign="top"><img src="docs/images/widget-preview.png" width="320" alt="배경화면이 비치는 실제 macOS 중형 위젯: 할 일 3개와 페이지 이동 버튼"></td>
+    <td valign="top"><img src="docs/images/widget-large-preview.png" width="320" alt="배경화면이 비치는 실제 macOS 대형 위젯: 미완료와 완료 항목 6개"></td>
   </tr>
 </table>
+
+위 이미지는 실제 Mac 바탕화면에서 촬영한 위젯입니다.
 
 바탕화면 공간에 맞춰 크기를 고르세요. 목록이 길면 **이전**·**다음**으로 넘길 수 있습니다.
 
