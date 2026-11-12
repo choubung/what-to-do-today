@@ -169,7 +169,7 @@ struct TodoWidgetView: View {
                         .transition(reduceMotion ? .identity : .opacity)
                     }
                 }
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: entry.tasks)
+                .animation(reduceMotion ? nil : .default, value: entry.tasks)
                 .transition(.identity)
                 Spacer(minLength: 0)
             }
@@ -228,29 +228,15 @@ struct TodoCompletionToggleStyle: ToggleStyle {
     var categoryName: String?
 
     func makeBody(configuration: Configuration) -> some View {
-        Button {
-            configuration.isOn.toggle()
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: configuration.isOn ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 15))
-                    .foregroundStyle(configuration.isOn ? Color.accentColor : Color.secondary)
-                    .contentTransition(.identity)
-                    .accessibilityHidden(true)
-                configuration.label
-                    .foregroundStyle(configuration.isOn ? .secondary : .primary)
-                    .strikethrough(configuration.isOn)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .animation(nil, value: configuration.isOn)
-        .accessibilityRemoveTraits(.isButton)
-        .accessibilityAddTraits(.isToggle)
-        .accessibilityValue(
-            (configuration.isOn ? "완료" : "미완료")
-            + (categoryName.map { ", \($0)" } ?? "")
-        )
+        Toggle(configuration)
+            .toggleStyle(.checkbox)
+            .foregroundStyle(configuration.isOn ? .secondary : .primary)
+            .strikethrough(configuration.isOn)
+            .animation(nil, value: configuration.isOn)
+            .accessibilityValue(
+                (configuration.isOn ? "완료" : "미완료")
+                + (categoryName.map { ", \($0)" } ?? "")
+            )
     }
 }
 
