@@ -40,7 +40,7 @@ struct StickyNoteView: View {
 
     private var fontSize: Double { model.effectiveStickyFontSize(for: note) }
     private var noteColorScheme: ColorScheme {
-        guard let hex = note.colorHex, let color = StickyNoteColor(hex: hex) else { return colorScheme }
+        guard let hex = note.effectiveColorHex, let color = StickyNoteColor(hex: hex) else { return colorScheme }
         return color.usesDarkText ? .light : .dark
     }
 
@@ -86,7 +86,7 @@ struct StickyNoteView: View {
                     HStack(alignment: .top, spacing: 8) {
                         Text(error)
                             .font(.caption)
-                            .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: note.colorHex)))
+                            .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: note.effectiveColorHex)))
                             .lineLimit(3)
                         Spacer(minLength: 0)
                         Button("확인") { model.errorMessage = nil }
@@ -100,14 +100,14 @@ struct StickyNoteView: View {
             .padding(.bottom, 14)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: note.colorHex)))
-        .background(Color(nsColor: StickyNoteAppearance.background(for: note.colorHex)))
+        .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: note.effectiveColorHex)))
+        .background(Color(nsColor: StickyNoteAppearance.background(for: note.effectiveColorHex)))
         .environment(\.colorScheme, noteColorScheme)
         .contentShape(Rectangle())
         .contextMenu { noteContextMenu }
         .allowsWindowActivationEvents()
         .popover(isPresented: $isEditingColor) {
-            StickyNoteColorEditor(initialHex: note.colorHex) { colorHex in
+            StickyNoteColorEditor(initialHex: note.colorHex, defaultLabel: "카테고리 색상", inheritedHex: note.categoryColorHex) { colorHex in
                 await model.setStickyColor(id: task.id, colorHex: colorHex)
             }
             .environment(\.colorScheme, colorScheme)
@@ -212,26 +212,34 @@ struct StickyNoteView: View {
     }
 }
 
-private struct StickyNoteColorEditor: View {
+struct StickyNoteColorEditor: View {
     let save: (String?) async -> Bool
     @State private var selectedHex: String?
     @State private var isSaving = false
     @State private var saveFailed = false
     @Environment(\.dismiss) private var dismiss
 
+    let defaultLabel: String
+    let inheritedHex: String?
+    let title: String
+    private var previewHex: String? { selectedHex ?? inheritedHex }
+
     private let presets: [(name: String, hex: String?)] = [
-        ("기본 노랑", nil), ("분홍", "#FBE4E8"), ("파랑", "#E0EDFC"),
+        ("노랑", "#FFF7D4"), ("분홍", "#FBE4E8"), ("파랑", "#E0EDFC"),
         ("민트", "#E0F3E7"), ("보라", "#ECE4FA"), ("회색", "#EBECEF")
     ]
 
-    init(initialHex: String?, save: @escaping (String?) async -> Bool) {
+    init(initialHex: String?, defaultLabel: String = "기본 노랑", inheritedHex: String? = nil, title: String = "포스트잇 색상", save: @escaping (String?) async -> Bool) {
         self.save = save
+        self.defaultLabel = defaultLabel
+        self.inheritedHex = inheritedHex
+        self.title = title
         _selectedHex = State(initialValue: initialHex)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("포스트잇 색상").font(.headline)
+            Text(title).font(.headline)
 
             HStack(spacing: 10) {
                 ForEach(presets, id: \.name) { preset in
@@ -258,15 +266,15 @@ private struct StickyNoteColorEditor: View {
             }
 
             ColorPicker("사용자 지정", selection: Binding(
-                get: { Color(nsColor: StickyNoteAppearance.background(for: selectedHex)) },
+                get: { Color(nsColor: StickyNoteAppearance.background(for: previewHex)) },
                 set: { if let hex = StickyNoteAppearance.hex(from: $0) { selectedHex = hex } }
             ), supportsOpacity: false)
 
             Text("할 일이 잘 보이는 색상")
                 .font(.body)
-                .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: selectedHex)))
+                .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: previewHex)))
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(Color(nsColor: StickyNoteAppearance.background(for: selectedHex)), in: RoundedRectangle(cornerRadius: 8))
+                .background(Color(nsColor: StickyNoteAppearance.background(for: previewHex)), in: RoundedRectangle(cornerRadius: 8))
 
             if saveFailed {
                 Text("색상을 저장하지 못했어요. 다시 시도해 주세요.")
@@ -275,7 +283,8 @@ private struct StickyNoteColorEditor: View {
             }
 
             HStack {
-                Button("기본 색상") { selectedHex = nil }
+                Button(defaultLabel) { selectedHex = nil }
+                    .disabled(selectedHex == nil)
                 Spacer()
                 Button("취소") { dismiss() }
                     .keyboardShortcut(.cancelAction)
