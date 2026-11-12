@@ -75,12 +75,19 @@ final class TodoStore: @unchecked Sendable {
         WHERE ?1 IS NULL OR (completed_at IS NULL AND (planned_day IS NULL OR planned_day <= ?3))
             OR (completed_at >= ?1 AND completed_at < ?2)
         """
-    private var orderedColumns: String {
-        """
-        SELECT id, title, created_at, completed_at, category_id, planned_day FROM todos
+    private let categoryOrder = "c.sort_order, (c.id = s.default_category_id) DESC, c.name_key, c.id"
+
+    private func taskListSQL(byCategory: Bool = false) -> String {
+        let categoryJoin = byCategory
+            ? "JOIN categories c ON c.id = todos.category_id JOIN category_settings s ON s.singleton = 1"
+            : ""
+        let categorySort = byCategory ? "\(categoryOrder), " : ""
+        return """
+        SELECT todos.id, title, created_at, completed_at, category_id, planned_day FROM todos
+        \(categoryJoin)
         \(dayFilter)
         ORDER BY completed_at IS NOT NULL ASC,
-                 COALESCE(completed_at, created_at) DESC, id ASC
+                 \(categorySort)COALESCE(completed_at, created_at) DESC, todos.id ASC
         """
     }
 
@@ -126,7 +133,7 @@ final class TodoStore: @unchecked Sendable {
     func fetchTasks() throws -> [TodoItem] {
         lock.lock()
         defer { lock.unlock() }
-        return try readTasks(sql: orderedColumns)
+        return try readTasks(sql: taskListSQL())
     }
 
     func fetchSnapshot(dayRange: DateInterval? = nil, includeUpcoming: Bool = false) throws -> TodoSnapshot {
@@ -140,7 +147,7 @@ final class TodoStore: @unchecked Sendable {
                 upcomingTasks = []
             }
             return TodoSnapshot(
-                tasks: try readTasks(sql: orderedColumns, dayRange: dayRange),
+                tasks: try readTasks(sql: taskListSQL(), dayRange: dayRange),
                 stickyNotes: try readStickyNotes(dayRange: dayRange),
                 stickyNoteDefaultFontSize: try readDefaultStickyFontSize(),
                 categories: try readCategories(),
@@ -162,7 +169,7 @@ final class TodoStore: @unchecked Sendable {
             let pageCount = max(1, (count - 1) / pageSize + 1)
             let clampedIndex = min(max(0, index), pageCount - 1)
             let tasks = try readTasks(
-                sql: orderedColumns + " LIMIT ?4 OFFSET ?5",
+                sql: taskListSQL(byCategory: true) + " LIMIT ?4 OFFSET ?5",
                 dayRange: dayRange,
                 pageSize: pageSize,
                 offset: clampedIndex * pageSize
@@ -1053,7 +1060,7 @@ final class TodoStore: @unchecked Sendable {
             SELECT c.id, c.name, c.id = s.default_category_id,
                 (SELECT COUNT(*) FROM todos t WHERE t.category_id = c.id)
             FROM categories c JOIN category_settings s ON s.singleton = 1
-            ORDER BY c.sort_order, (c.id = s.default_category_id) DESC, c.name_key, c.id
+            ORDER BY \(categoryOrder)
             """)
         defer { sqlite3_finalize(statement) }
         var categories: [TodoCategory] = []
