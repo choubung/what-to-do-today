@@ -19,6 +19,7 @@ enum TodoStoreError: LocalizedError {
     case invalidFontSize
     case invalidColor
     case invalidRecord
+    case invalidBackup
     case database(String)
 
     var errorDescription: String? {
@@ -57,6 +58,8 @@ enum TodoStoreError: LocalizedError {
             return "포스트잇 색상이 올바르지 않아요. 다시 선택해 주세요."
         case .invalidRecord:
             return "저장된 할 일 정보를 읽을 수 없어요."
+        case .invalidBackup:
+            return "이 버전에서 읽을 수 있는 What to Do Today 백업 파일을 선택해 주세요."
         case .database(let message):
             return "할 일을 저장하거나 불러오지 못했어요. \(message)"
         }
@@ -66,7 +69,13 @@ enum TodoStoreError: LocalizedError {
 /// Each connection is locked locally. SQLite transactions coordinate app and widget processes.
 final class TodoStore: @unchecked Sendable {
     static let appGroupIdentifier = "group.com.choubung.whattodotoday"
+    #if STANDALONE
+    static let notificationName = Notification.Name("com.choubung.whattodotoday.standalone.tasksChanged")
+    #else
     static let notificationName = Notification.Name("com.choubung.whattodotoday.tasksChanged")
+    #endif
+
+    private let databaseURL: URL
 
     private var database: OpaquePointer?
     private let lock = NSLock()
@@ -92,11 +101,12 @@ final class TodoStore: @unchecked Sendable {
     }
 
     init(databaseURL: URL) throws {
+        self.databaseURL = databaseURL
         try FileManager.default.createDirectory(
             at: databaseURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_URI
         guard sqlite3_open_v2(databaseURL.path, &database, flags, nil) == SQLITE_OK else {
             let error = databaseError()
             sqlite3_close(database)
@@ -109,6 +119,7 @@ final class TodoStore: @unchecked Sendable {
             sqlite3_busy_timeout(database, 5_000)
             try execute("PRAGMA synchronous = FULL")
             try execute("PRAGMA foreign_keys = ON")
+            try execute("PRAGMA trusted_schema = OFF")
             try configureSchema()
         } catch {
             sqlite3_close(database)
@@ -122,11 +133,15 @@ final class TodoStore: @unchecked Sendable {
     }
 
     static func live() throws -> TodoStore {
+        #if STANDALONE
+        let container = URL.applicationSupportDirectory.appendingPathComponent("What to Do Today (DMG)", isDirectory: true)
+        #else
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupIdentifier
         ) else {
             throw TodoStoreError.unavailableAppGroup
         }
+        #endif
         return try TodoStore(databaseURL: container.appendingPathComponent("Tasks.sqlite"))
     }
 
@@ -1313,5 +1328,166 @@ final class TodoStore: @unchecked Sendable {
     private func databaseError() -> TodoStoreError {
         guard let database else { return .database("저장 공간을 열 수 없어요.") }
         return .database(String(cString: sqlite3_errmsg(database)))
+    }
+}
+
+extension TodoStore {
+    private static let backupID = 0x57544454 // WTDT
+    private static let backupVersion = 2
+
+    // Copy data into our own schema so a backup can't install tables, triggers or views.
+    // Keep this list and the backup format version in sync with future schema changes.
+    private static let legacyBackupTables: [(name: String, columns: String)] = [
+        ("categories", "id, name, name_key, sticky_color_hex, sort_order"),
+        ("category_settings", "singleton, default_category_id"),
+        ("todos", "id, title, created_at, completed_at, category_id, planned_day"),
+        ("app_settings", "key, value"),
+        ("sticky_notes", "todo_id, is_visible, is_always_on_top, position_x, position_y, display_id, width, height, font_size, color_hex"),
+        ("todo_reminders", "todo_id, generation_id, year, month, day, hour, minute, delivered_at")
+    ]
+
+    private static let backupTables = legacyBackupTables.map { table in
+        guard table.name == "sticky_notes" else { return table }
+        return (name: table.name, columns: table.columns + ", reopen_on_completion_undo")
+    } + [(name: "sticky_note_restore", columns: "todo_id")]
+
+    func exportBackup(to folder: URL) throws -> URL {
+        try Self.withBackupWorkspace { workspace in
+            let snapshot = workspace.appendingPathComponent("Backup.sqlite")
+            try writeBackup(to: snapshot)
+            let output = folder.appendingPathComponent(Self.backupFilename(prefix: "What to Do Today"))
+            try FileManager.default.copyItem(at: snapshot, to: output)
+            return output
+        }
+    }
+
+    func restoreBackup(from input: URL) throws -> URL {
+        try Self.withBackupWorkspace { workspace in
+            let snapshot = workspace.appendingPathComponent("Backup.sqlite")
+            let source = input.resolvingSymlinksInPath()
+            guard try source.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
+            else { throw TodoStoreError.invalidBackup }
+            try FileManager.default.copyItem(at: source, to: snapshot)
+
+            lock.lock()
+            defer { lock.unlock() }
+            do {
+                let attach = try prepare("ATTACH DATABASE ? AS transfer")
+                defer { sqlite3_finalize(attach) }
+                try bind(snapshot.absoluteString + "?mode=ro&immutable=1", to: attach, at: 1)
+                try finishWrite(attach)
+            } catch {
+                throw TodoStoreError.invalidBackup
+            }
+            defer { try? execute("DETACH DATABASE transfer") }
+            let tablesToImport = try validateAttachedBackup()
+
+            return try withTransaction(readOnly: false) {
+                let folder = databaseURL.deletingLastPathComponent().appendingPathComponent("Backups", isDirectory: true)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let rollback = folder.appendingPathComponent(Self.backupFilename(prefix: "Before Import"))
+                // The write transaction excludes app, widget and MCP writers while
+                // a separate reader snapshots the last committed state in WAL mode.
+                try writeBackup(to: rollback)
+
+                for table in Self.backupTables.reversed() {
+                    try execute("DELETE FROM main.\(table.name)")
+                }
+                for table in tablesToImport {
+                    try execute("""
+                        INSERT INTO main.\(table.name) (\(table.columns))
+                        SELECT \(table.columns) FROM transfer.\(table.name)
+                        """)
+                }
+                _ = try readDefaultCategoryID()
+                _ = try readTasks(sql: taskListSQL())
+                _ = try readCategories()
+                _ = try readStickyNotes(dayRange: nil)
+                _ = try readReminders(dayRange: nil)
+                _ = try readDefaultStickyFontSize()
+                return rollback
+            }
+        }
+    }
+
+    private func validateAttachedBackup() throws -> [(name: String, columns: String)] {
+        func value(_ sql: String) throws -> String {
+            let statement = try prepare(sql)
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { throw TodoStoreError.invalidBackup }
+            return stringColumn(statement, index: 0)
+        }
+
+        do {
+            guard try value("PRAGMA transfer.application_id") == String(Self.backupID),
+                  try value("PRAGMA transfer.quick_check") == "ok"
+            else { throw TodoStoreError.invalidBackup }
+
+            let tables: [(name: String, columns: String)]
+            switch try value("PRAGMA transfer.user_version") {
+            case "1": tables = Self.legacyBackupTables
+            case String(Self.backupVersion): tables = Self.backupTables
+            default: throw TodoStoreError.invalidBackup
+            }
+            let names = tables.map { "'\($0.name)'" }.joined(separator: ", ")
+            guard try value("""
+                SELECT count(*) FROM pragma_table_list
+                WHERE schema = 'transfer' AND type = 'table' AND name IN (\(names))
+                """) == String(tables.count),
+                try value("SELECT count(*) FROM transfer.todos WHERE category_id IS NULL") == "0"
+            else { throw TodoStoreError.invalidBackup }
+            return tables
+        } catch {
+            throw TodoStoreError.invalidBackup
+        }
+    }
+
+    private func writeBackup(to output: URL) throws {
+        let snapshotDirectory = output.deletingLastPathComponent()
+        // Keep the unfinished SQLite file invisible until the backup has closed.
+        let working = snapshotDirectory.appendingPathComponent(".\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: working) }
+
+        do {
+            var source: OpaquePointer?
+            defer { sqlite3_close(source) }
+            guard sqlite3_open_v2(databaseURL.path, &source, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+                throw TodoStoreError.database("백업할 저장 공간을 열 수 없어요.")
+            }
+            sqlite3_busy_timeout(source, 5_000)
+
+            let attributes: [FileAttributeKey: Any] = [.posixPermissions: 0o600]
+            guard FileManager.default.createFile(atPath: working.path, contents: nil, attributes: attributes) else {
+                throw TodoStoreError.database("백업 파일을 만들 수 없어요.")
+            }
+            var destination: OpaquePointer?
+            defer { sqlite3_close(destination) }
+            guard sqlite3_open_v2(working.path, &destination, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+                  let backup = sqlite3_backup_init(destination, "main", source, "main")
+            else { throw TodoStoreError.database("백업 파일을 열 수 없어요.") }
+
+            let step = sqlite3_backup_step(backup, -1)
+            let finish = sqlite3_backup_finish(backup)
+            guard step == SQLITE_DONE, finish == SQLITE_OK,
+                  sqlite3_exec(destination, """
+                    PRAGMA journal_mode = DELETE;
+                    PRAGMA application_id = \(Self.backupID);
+                    PRAGMA user_version = \(Self.backupVersion);
+                    """, nil, nil, nil) == SQLITE_OK
+            else { throw TodoStoreError.database("백업을 저장할 수 없어요.") }
+        }
+        try FileManager.default.moveItem(at: working, to: output)
+    }
+
+    private static func backupFilename(prefix: String) -> String {
+        let day = Date.now.formatted(.iso8601.year().month().day().dateSeparator(.dash))
+        return "\(prefix) \(day) \(UUID().uuidString.prefix(8)).wtdtbackup"
+    }
+
+    private static func withBackupWorkspace<Value>(_ operation: (URL) throws -> Value) throws -> Value {
+        let folder = URL.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: folder) }
+        return try operation(folder)
     }
 }

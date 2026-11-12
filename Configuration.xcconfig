@@ -1,2 +1,6 @@
-// Local signing settings apply to the app and widget in both build configurations.
+MARKETING_VERSION = 1.3.5
+CURRENT_PROJECT_VERSION = 28
+TODO_URL_SCHEME = whattodotoday
+
+// Local signing settings apply to the widget-enabled app and its extension.
 #include? "Signing.xcconfig"

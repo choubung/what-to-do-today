@@ -321,6 +321,7 @@
 			"isa" = "PBXGroup";
 			"children" = (
 				"B6CDB6E5D160E013280D3C68",
+				"D640A66BBEEA04A913680001",
 				"4C47665D1BA4105DF9684DC4",
 			);
 			"name" = "Products";
@@ -440,8 +441,6 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.3.3";
-				"CURRENT_PROJECT_VERSION" = "21";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "TodoWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
@@ -472,8 +471,6 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.3.3";
-				"CURRENT_PROJECT_VERSION" = "21";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "TodoWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
@@ -621,8 +618,6 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.3.3";
-				"CURRENT_PROJECT_VERSION" = "21";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "What to Do Today";
 				"PRODUCT_MODULE_NAME" = "WhatToDoToday";
@@ -651,8 +646,6 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.3.3";
-				"CURRENT_PROJECT_VERSION" = "21";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "What to Do Today";
 				"PRODUCT_MODULE_NAME" = "WhatToDoToday";
@@ -695,6 +688,213 @@
 			"name" = "WhatToDoToday";
 			"productName" = "WhatToDoToday";
 			"productReference" = "B6CDB6E5D160E013280D3C68";
+			"productType" = "com.apple.product-type.application";
+		};
+		"D640A66BBEEA04A913680001" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.application";
+			"includeInIndex" = 0;
+			"path" = "What to Do Today (DMG).app";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"D640A66BBEEA04A913680100" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "C81C62CE5AD846769BCDE001";
+		};
+		"D640A66BBEEA04A913680101" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "79898B7E1EF29C692E8FD6FE";
+		};
+		"D640A66BBEEA04A913680102" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "EDCE8D5DC9DCA52C3F33E45A";
+		};
+		"D640A66BBEEA04A913680103" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "B21CFB2BD917AD1463D3DF05";
+		};
+		"D640A66BBEEA04A913680104" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "BBCC9733DD239910EC3A7A9A";
+		};
+		"D640A66BBEEA04A913680105" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "12558FB3E82CB58263FE877F";
+		};
+		"D640A66BBEEA04A913680106" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "CBDF94E9B23E44938BE6C130";
+		};
+		"D640A66BBEEA04A913680107" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "C9B33A00AD0ABC7DA5D92E59";
+		};
+		"D640A66BBEEA04A913680108" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "89FBB49C269DD96D95C7BE81";
+		};
+		"D640A66BBEEA04A913680109" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "B49A1F7F23162CC4CD1C1022";
+		};
+		"D640A66BBEEA04A91368010A" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "44D14998D1DA7D5C61F83C53";
+		};
+		"D640A66BBEEA04A91368010B" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "32245F28D0E9559254A6C642";
+		};
+		"D640A66BBEEA04A91368010C" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "5CFC394B37130138D6B50CFD";
+		};
+		"D640A66BBEEA04A91368010D" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "FD52AB7CD648A21D9F37D67C";
+		};
+		"D640A66BBEEA04A91368010E" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "82E05A62178B4CDCA755FC61";
+		};
+		"D640A66BBEEA04A91368010F" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "82E05A62178B4CDCA755FC63";
+		};
+		"D640A66BBEEA04A913680110" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "090B157313F476AF110D37E6";
+		};
+		"D640A66BBEEA04A913680111" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "7457B5880437C09960B360CD";
+		};
+		"D640A66BBEEA04A913680002" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"D640A66BBEEA04A913680100",
+				"D640A66BBEEA04A913680101",
+				"D640A66BBEEA04A913680102",
+				"D640A66BBEEA04A913680103",
+				"D640A66BBEEA04A913680104",
+				"D640A66BBEEA04A913680105",
+				"D640A66BBEEA04A913680106",
+				"D640A66BBEEA04A913680107",
+				"D640A66BBEEA04A913680108",
+				"D640A66BBEEA04A913680109",
+				"D640A66BBEEA04A91368010A",
+				"D640A66BBEEA04A91368010B",
+				"D640A66BBEEA04A91368010C",
+				"D640A66BBEEA04A91368010D",
+				"D640A66BBEEA04A91368010E",
+				"D640A66BBEEA04A91368010F",
+				"D640A66BBEEA04A913680110",
+				"D640A66BBEEA04A913680111",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"D640A66BBEEA04A913680003" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"D640A66BBEEA04A913680114" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "D4762988CB514F8DAB91DEB7";
+		};
+		"D640A66BBEEA04A913680004" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"D640A66BBEEA04A913680114",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"D640A66BBEEA04A913680005" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Manual";
+				"CODE_SIGN_IDENTITY" = "-";
+				"DEVELOPMENT_TEAM" = "";
+				"TODO_URL_SCHEME" = "whattodotoday-dmg";
+				"COMBINE_HIDPI_IMAGES" = "YES";
+				"ENABLE_HARDENED_RUNTIME" = "YES";
+				"OTHER_LDFLAGS" = (
+					"$(inherited)",
+					"-lsqlite3",
+				);
+				"SWIFT_EMIT_LOC_STRINGS" = "YES";
+				"PRODUCT_NAME" = "What to Do Today (DMG)";
+				"PRODUCT_MODULE_NAME" = "WhatToDoTodayStandalone";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.standalone";
+				"INFOPLIST_FILE" = "App/Info.plist";
+				"GENERATE_INFOPLIST_FILE" = "NO";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "STANDALONE";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
+			};
+			"name" = "Release";
+		};
+		"D640A66BBEEA04A913680008" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Manual";
+				"CODE_SIGN_IDENTITY" = "-";
+				"DEVELOPMENT_TEAM" = "";
+				"TODO_URL_SCHEME" = "whattodotoday-dmg";
+				"COMBINE_HIDPI_IMAGES" = "YES";
+				"ENABLE_HARDENED_RUNTIME" = "YES";
+				"OTHER_LDFLAGS" = (
+					"$(inherited)",
+					"-lsqlite3",
+				);
+				"SWIFT_EMIT_LOC_STRINGS" = "YES";
+				"PRODUCT_NAME" = "What to Do Today (DMG)";
+				"PRODUCT_MODULE_NAME" = "WhatToDoTodayStandalone";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.standalone";
+				"INFOPLIST_FILE" = "App/Info.plist";
+				"GENERATE_INFOPLIST_FILE" = "NO";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG STANDALONE";
+			};
+			"name" = "Debug";
+		};
+		"D640A66BBEEA04A913680006" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"D640A66BBEEA04A913680008",
+				"D640A66BBEEA04A913680005",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"D640A66BBEEA04A913680007" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "D640A66BBEEA04A913680006";
+			"buildPhases" = (
+				"D640A66BBEEA04A913680002",
+				"D640A66BBEEA04A913680003",
+				"D640A66BBEEA04A913680004",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+			);
+			"name" = "WhatToDoTodayStandalone";
+			"productName" = "WhatToDoTodayStandalone";
+			"productReference" = "D640A66BBEEA04A913680001";
 			"productType" = "com.apple.product-type.application";
 		};
 		"98F54143AB4E86B28C3AFEE0" = {
@@ -742,6 +942,7 @@
 			"projectRoot" = "";
 			"targets" = (
 				"2BF284F0A688BA76DD7E29CA",
+				"D640A66BBEEA04A913680007",
 				"317F51252E85243F14493A81",
 			);
 		};
