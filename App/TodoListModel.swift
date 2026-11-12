@@ -1,6 +1,8 @@
 import AppKit
 import Combine
+#if !STANDALONE
 import WidgetKit
+#endif
 
 private actor TodoRepository {
     private var store: TodoStore?
@@ -12,6 +14,14 @@ private actor TodoRepository {
         let opened = try TodoStore.live()
         store = opened
         return opened
+    }
+
+    func exportBackup(to folder: URL) throws -> URL {
+        try connection().exportBackup(to: folder)
+    }
+
+    func restoreBackup(from file: URL) throws -> URL {
+        try connection().restoreBackup(from: file)
     }
 
     func fetchSnapshot() throws -> TodoSnapshot {
@@ -353,6 +363,25 @@ final class TodoListModel: ObservableObject {
         }
     }
 
+    func exportBackup(to folder: URL) async throws -> URL {
+        await waitForPendingSave()
+        return try await repository.exportBackup(to: folder)
+    }
+
+    func restoreBackup(from file: URL) async throws -> URL {
+        await waitForPendingSave()
+        isSaving = true
+        defer {
+            isSaving = false
+            resumeSaveWaitersIfIdle()
+        }
+        let previousBackup = try await repository.restoreBackup(from: file)
+        errorMessage = nil
+        notifyChange(reloadWidgets: true)
+        await refresh()
+        return previousBackup
+    }
+
     func waitForPendingSave() async {
         guard isSaving || !pendingCompletions.isEmpty || pendingPreferenceSaves > 0 || pendingReminderSaves > 0 else { return }
         await withCheckedContinuation { continuation in
@@ -442,7 +471,9 @@ final class TodoListModel: ObservableObject {
             userInfo: nil,
             deliverImmediately: true
         )
+        #if !STANDALONE
         if reloadWidgets { WidgetCenter.shared.reloadAllTimelines() }
+        #endif
     }
 
     private func resumeSaveWaitersIfIdle() {
