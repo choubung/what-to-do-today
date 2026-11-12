@@ -36,7 +36,8 @@ struct SetTodoCompletionIntent: AppIntent {
                 TodoStore.notificationName, object: nil, userInfo: nil, deliverImmediately: true
             )
             TodoWidgetState.setActionFailed(false, for: familyKey)
-            WidgetCenter.shared.reloadAllTimelines()
+            // Returning from this widget interaction reloads this kind's timelines,
+            // including both sizes. An explicit reload here queues a duplicate refresh.
         } catch {
             TodoWidgetState.setActionFailed(true, for: familyKey)
         }
