@@ -39,7 +39,7 @@ struct AppSettingsView: View {
                 get: { coordinator.startsAtLogin },
                 set: { enabled in Task { await coordinator.setStartsAtLogin(enabled) } }
             ))
-            Text("로그인 시 자동 실행을 켜면 앱을 직접 열기 전에도 놓친 알림을 묶어 전달합니다. 창을 닫아도 알림은 계속되며, ⌘Q로 앱을 완전히 종료하면 다음 실행까지 알림이 멈춥니다.")
+            Text("로그인 시 자동 실행을 켜면 앱을 직접 열기 전에도 놓친 알림을 묶어 전달합니다. 창을 닫아도 알림은 계속됩니다. 메뉴 막대에서 앱을 종료하면 다음 실행까지 알림이 멈춥니다.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let error = model.errorMessage ?? coordinator.errorMessage {
                 Text(error).font(.callout).foregroundStyle(.red)

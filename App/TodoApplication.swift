@@ -13,7 +13,7 @@ enum TodoApplication {
         let application = NSApplication.shared
         let delegate = TodoApplicationDelegate()
         application.delegate = delegate
-        application.setActivationPolicy(.regular)
+        application.setActivationPolicy(.accessory)
         withExtendedLifetime(delegate) { application.run() }
     }
 
@@ -38,10 +38,11 @@ enum TodoApplication {
 }
 
 @MainActor
-final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
+final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let model = TodoListModel()
     private var mainWindow: NSWindow?
     private var quickAddWindow: NSPanel?
+    private var statusItem: NSStatusItem?
     private var openedFromURL = false
     private lazy var stickyNotes = StickyNoteCoordinator(model: model)
     private lazy var reminders = ReminderCoordinator(
@@ -56,6 +57,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenu()
+        configureStatusItem()
         _ = stickyNotes
         reminders.onOpenList = { [weak self] in self?.showMainWindow() }
         reminders.start()
@@ -101,6 +103,17 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func windowWillClose(_ notification: Notification) {
+        // AppKit sends this before updating the window's visibility.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !isPreparingToTerminate else { return }
+            let hasEditor = [mainWindow, quickAddWindow].contains {
+                $0?.isVisible == true || $0?.isMiniaturized == true
+            }
+            if !hasEditor { NSApp.setActivationPolicy(.accessory) }
+        }
+    }
 
     func applicationWillTerminate(_ notification: Notification) {
         reminders.stop()
@@ -171,6 +184,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showMainWindow() {
+        NSApp.setActivationPolicy(.regular)
         if mainWindow == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 460, height: 580),
@@ -182,6 +196,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
             window.contentView = NSHostingView(rootView: TodoListView(model: model, reminders: reminders))
             window.minSize = NSSize(width: 360, height: 380)
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.setFrameAutosaveName("TodoMainWindow")
             window.center()
             mainWindow = window
@@ -192,6 +207,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showQuickAdd() {
+        NSApp.setActivationPolicy(.regular)
         if let quickAddWindow, quickAddWindow.isVisible {
             quickAddWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -207,6 +223,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         panel.title = "새 할 일"
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
+        panel.delegate = self
         panel.contentView = NSHostingView(rootView: QuickAddView(model: model) { [weak panel] in
             panel?.close()
         })
@@ -214,6 +231,21 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         quickAddWindow = panel
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func configureStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "What to Do Today")
+        item.button?.toolTip = "What to Do Today"
+
+        let menu = NSMenu()
+        menu.addItem(withTitle: "할 일 목록 열기", action: #selector(showMainWindow), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "새 할 일", action: #selector(showQuickAdd), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "포스트잇 모두 숨기기", action: #selector(hideAllStickyNotes), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "What to Do Today 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "").target = NSApp
+        item.menu = menu
+        statusItem = item
     }
 
     private func configureMenu() {
