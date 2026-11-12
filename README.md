@@ -10,8 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/choubung/what-to-do-today/releases/latest"><strong>최신 릴리즈</strong></a>
-  · <a href="#설치하고-시작하기">설치 방법</a><br>
+  <strong>v1.3.4</strong>
+  · <a href="https://github.com/choubung/what-to-do-today/releases/download/v1.3.4/WhatToDoToday-1.3.4.dmg"><strong>DMG 다운로드 (위젯 없음)</strong></a>
+  · <a href="https://github.com/choubung/what-to-do-today/blob/v1.3.4/docs/build.md#위젯-포함-앱-직접-설치"><strong>Xcode 설치 안내 (위젯 포함)</strong></a><br>
+  <a href="https://github.com/choubung/what-to-do-today/releases/latest">최신 릴리즈</a>
+  · <a href="#설치하고-시작하기">최신 버전 설치 방법</a><br>
   <sub>Apple Silicon Mac · macOS 27.0.1 이상</sub>
 </p>
 
