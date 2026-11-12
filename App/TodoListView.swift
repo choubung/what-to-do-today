@@ -7,14 +7,13 @@ struct TodoListView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editingTask: TodoItem?
     @State private var deletingTask: TodoItem?
-    @State private var showingStickyPicker = false
-    @State private var isSavingFontSize = false
     @State private var collapsedCategories: Set<String> = []
     @State private var addingCategory: TodoCategory?
     @State private var showingCategories = false
     @State private var categoryMoveNotice: TodoCategory?
     @State private var showingCompletionHistory = false
-    @State private var showingReminderSettings = false
+    @State private var showingSettings = false
+    @State private var showingStickyPicker = false
     @State private var reminderTask: TodoItem?
     @Environment(\.controlActiveState) private var controlActiveState
 
@@ -29,12 +28,18 @@ struct TodoListView: View {
                     Label("이전 완료", systemImage: "calendar")
                 }
                 .buttonStyle(.borderless).controlSize(.small).disabled(model.isLoading)
-                stickyManagementMenu
-                Button { showingReminderSettings = true } label: {
-                    Image(systemName: "bell")
+                Button { showingStickyPicker = true } label: {
+                    Image(systemName: "note")
                 }
                 .buttonStyle(.plain)
-                .help("알림 설정").accessibilityLabel("알림 설정")
+                .help("포스트잇 띄우기").accessibilityLabel("포스트잇 띄우기")
+                .disabled(model.isLoading || model.isSaving || model.incompleteTasks.isEmpty)
+                Button { showingSettings = true } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.plain)
+                .help("설정").accessibilityLabel("설정")
+                .keyboardShortcut(",", modifiers: .command)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -91,17 +96,17 @@ struct TodoListView: View {
                 collapsedCategories.remove("pending:\(category.id)")
             }
         }
-        .sheet(isPresented: $showingStickyPicker) {
-            StickyNotePickerView(model: model)
-        }
         .sheet(isPresented: $showingCategories) {
             TodoCategoryManager(model: model)
         }
         .sheet(isPresented: $showingCompletionHistory) {
             CompletionHistoryView(model: model, initialCategoryID: nil)
         }
-        .sheet(isPresented: $showingReminderSettings) {
-            ReminderSettingsView(coordinator: reminders)
+        .sheet(isPresented: $showingSettings) {
+            AppSettingsView(model: model, coordinator: reminders)
+        }
+        .sheet(isPresented: $showingStickyPicker) {
+            StickyNotePickerView(model: model)
         }
         .sheet(item: $reminderTask) { task in
             TodoReminderEditor(model: model, coordinator: reminders, taskID: task.id)
@@ -119,7 +124,7 @@ struct TodoListView: View {
             Text(task.title)
         }
         .alert("처리하지 못했어요", isPresented: Binding(
-            get: { model.errorMessage != nil && !showingCompletionHistory && addingCategory == nil && editingTask == nil && reminderTask == nil && !showingReminderSettings && !showingStickyPicker && !showingCategories && controlActiveState == .key },
+            get: { model.errorMessage != nil && !showingCompletionHistory && addingCategory == nil && editingTask == nil && reminderTask == nil && !showingSettings && !showingStickyPicker && !showingCategories && controlActiveState == .key },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
             Button("다시 불러오기") {
@@ -203,63 +208,6 @@ struct TodoListView: View {
                     taskRows(tasks)
                 }
             }
-        }
-    }
-
-    private var stickyManagementMenu: some View {
-        Menu {
-            Button("할 일 선택해서 띄우기…", systemImage: "note") {
-                showingStickyPicker = true
-            }
-            .disabled(model.incompleteTasks.isEmpty || model.isSaving)
-
-            Button("모두 숨기기", systemImage: "eye.slash") {
-                Task { _ = await model.hideAllStickyNotes() }
-            }
-            .disabled(model.visibleStickyCount == 0 || model.isSaving)
-            .help("할 일의 완료 상태를 바꾸지 않고 모든 포스트잇을 숨깁니다.")
-
-            Divider()
-            Menu("기본 글자 크기") {
-                Text("현재 \(model.defaultStickyFontSize.formatted()) pt")
-                Divider()
-                Button("작게") {
-                    changeDefaultStickyFontSize(max(
-                        StickyNoteTypography.minimumFontSize,
-                        model.defaultStickyFontSize - StickyNoteTypography.fontSizeStep
-                    ))
-                }
-                .disabled(model.defaultStickyFontSize <= StickyNoteTypography.minimumFontSize)
-
-                Button("크게") {
-                    changeDefaultStickyFontSize(min(
-                        StickyNoteTypography.maximumFontSize,
-                        model.defaultStickyFontSize + StickyNoteTypography.fontSizeStep
-                    ))
-                }
-                .disabled(model.defaultStickyFontSize >= StickyNoteTypography.maximumFontSize)
-
-                Divider()
-                Button("기본값 (\(StickyNoteTypography.defaultFontSize.formatted()) pt)") {
-                    changeDefaultStickyFontSize(StickyNoteTypography.defaultFontSize)
-                }
-                .disabled(model.defaultStickyFontSize == StickyNoteTypography.defaultFontSize)
-            }
-            .disabled(isSavingFontSize)
-        } label: {
-            Label("포스트잇 관리", systemImage: "note")
-        }
-        .menuStyle(.borderlessButton)
-        .controlSize(.small)
-        .fixedSize()
-    }
-
-    private func changeDefaultStickyFontSize(_ fontSize: Double) {
-        guard !isSavingFontSize else { return }
-        isSavingFontSize = true
-        Task {
-            defer { isSavingFontSize = false }
-            await model.setDefaultStickyFontSize(fontSize)
         }
     }
 
@@ -399,12 +347,14 @@ private struct TodoTaskRow: View {
     }
 }
 
-private struct StickyNotePickerView: View {
+struct StickyNotePickerView: View {
     @ObservedObject var model: TodoListModel
     @Environment(\.dismiss) private var dismiss
     @State private var selectedIDs: Set<UUID> = []
 
-    private var availableIDs: [UUID] { model.incompleteTasks.map(\.id) }
+    private var availableIDs: [UUID] {
+        model.incompleteTasks.filter { !model.isStickyVisible(for: $0.id) }.map(\.id)
+    }
     private var selectedCount: Int { selectedIDs.intersection(availableIDs).count }
 
     var body: some View {
@@ -432,8 +382,9 @@ private struct StickyNotePickerView: View {
             } else {
                 List(model.incompleteTasks) { task in
                     Toggle(isOn: Binding(
-                        get: { selectedIDs.contains(task.id) },
+                        get: { selectedIDs.contains(task.id) && !model.isStickyVisible(for: task.id) },
                         set: { isSelected in
+                            guard !model.isStickyVisible(for: task.id) else { return }
                             if isSelected { selectedIDs.insert(task.id) }
                             else { selectedIDs.remove(task.id) }
                         }
@@ -450,7 +401,7 @@ private struct StickyNotePickerView: View {
                         }
                     }
                     .toggleStyle(.checkbox)
-                    .disabled(model.isSaving)
+                    .disabled(model.isSaving || model.isStickyVisible(for: task.id))
                     .padding(.vertical, 4)
                     .listRowSeparator(.hidden)
                 }
@@ -739,11 +690,12 @@ private struct TodoCategoryPicker: View {
 }
 
 private enum CategoryManagementSheet: Identifiable {
-    case create, rename(TodoCategory), delete(TodoCategory)
+    case create, rename(TodoCategory), delete(TodoCategory), color(TodoCategory)
 
     var id: String {
         switch self {
         case .create: "create"
+        case .color(let category): "color-\(category.id)"
         case .rename(let category): "rename-\(category.id)"
         case .delete(let category): "delete-\(category.id)"
         }
@@ -779,6 +731,14 @@ private struct TodoCategoryManager: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            Button { activeSheet = .color(category) } label: {
+                                Circle()
+                                    .fill(Color(nsColor: StickyNoteAppearance.background(for: category.stickyColorHex)))
+                                    .overlay { Circle().strokeBorder(.secondary, lineWidth: 1) }
+                                    .frame(width: 18, height: 18)
+                            }
+                            .help("포스트잇 기본 색상")
+                            .accessibilityLabel("\(category.name) 포스트잇 기본 색상")
                             Button { activeSheet = .rename(category) } label: { Image(systemName: "pencil") }
                                 .help("이름 변경").accessibilityLabel("\(category.name) 이름 변경")
                             Button { activeSheet = .delete(category) } label: { Image(systemName: "trash") }
@@ -817,6 +777,10 @@ private struct TodoCategoryManager: View {
         .interactiveDismissDisabled(model.isSaving)
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
+            case .color(let category):
+                StickyNoteColorEditor(initialHex: category.stickyColorHex, title: "\(category.name) 포스트잇 색상") { hex in
+                    await model.setCategoryStickyColor(id: category.id, colorHex: hex)
+                }
             case .create: TodoCategoryNameEditor(model: model)
             case .rename(let category): TodoCategoryNameEditor(model: model, category: category)
             case .delete(let category): TodoCategoryDeleteView(model: model, category: category)

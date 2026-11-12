@@ -6,6 +6,15 @@ enum StickyNoteLayout {
     static let defaultSize = CGSize(width: 280, height: 190)
     static let minimumSize = CGSize(width: 240, height: 160)
 
+    /// Bottom-right resize keeps the top-left corner fixed in screen coordinates.
+    static func resizedFrame(from initial: CGRect, delta: CGPoint, minimumSize: CGSize) -> CGRect {
+        let size = CGSize(
+            width: max(minimumSize.width, initial.width + delta.x),
+            height: max(minimumSize.height, initial.height - delta.y)
+        )
+        return CGRect(x: initial.minX, y: initial.maxY - size.height, width: size.width, height: size.height)
+    }
+
     struct Screen: Equatable {
         let id: String
         let visibleFrame: CGRect

@@ -110,6 +110,10 @@ private actor TodoRepository {
         try connection().saveDefaultStickyFontSize(fontSize)
     }
 
+    func saveCategoryStickyColor(id: UUID, colorHex: String?) throws {
+        try connection().saveCategoryStickyColor(id: id, colorHex: colorHex)
+    }
+
     func saveStickyColor(id: UUID, colorHex: String?) throws {
         try connection().saveStickyColor(id: id, colorHex: colorHex)
     }
@@ -374,6 +378,12 @@ final class TodoListModel: ObservableObject {
     func setDefaultStickyFontSize(_ fontSize: Double) async {
         _ = await saveStickyAppearance(failureMessage: Self.fontErrorMessage) {
             try await self.repository.saveDefaultStickyFontSize(fontSize)
+        }
+    }
+
+    func setCategoryStickyColor(id: UUID, colorHex: String?) async -> Bool {
+        await save(reloadWidgets: false) {
+            try await self.repository.saveCategoryStickyColor(id: id, colorHex: colorHex)
         }
     }
 
