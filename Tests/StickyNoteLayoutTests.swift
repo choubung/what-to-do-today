@@ -34,11 +34,13 @@ private enum StickyNoteLayoutTests {
         try expect(resized.frame.size == CGSize(width: 520, height: 360), "Restoring a resized note must preserve both dimensions")
         try expect(resized.frame.origin == restored.frame.origin, "Restoring a resized note must preserve its saved position")
 
-        let undersized = StickyNoteLayout.placement(
-            savedOrigin: CGPoint(x: 100, y: 100), displayID: "main",
-            size: CGSize(width: 80, height: 60), screens: [main]
-        )!
-        try expect(undersized.frame.size == StickyNoteLayout.minimumSize, "Notes restored below the readable minimum must grow to that minimum")
+        for compactSize in [CGSize(width: 134, height: 128), CGSize(width: 120, height: 96)] {
+            let compact = StickyNoteLayout.placement(
+                savedOrigin: CGPoint(x: 100, y: 100), displayID: "main",
+                size: compactSize, screens: [main]
+            )!
+            try expect(compact.frame.size == compactSize, "Restoring a compact note must not enlarge its saved size")
+        }
 
         let removed = StickyNoteLayout.placement(
             savedOrigin: restored.frame.origin, displayID: "left", size: size, screens: [main]
@@ -88,7 +90,7 @@ private enum StickyNoteLayoutTests {
     private static func checkResizeTargets() throws {
         let initial = CGRect(x: -500, y: 100, width: 280, height: 190)
         let minimum = StickyNoteLayout.minimumSize
-        let smaller = StickyNoteLayout.resizedFrame(from: initial, delta: CGPoint(x: -100, y: 100), minimumSize: minimum)
+        let smaller = StickyNoteLayout.resizedFrame(from: initial, delta: CGPoint(x: -200, y: 100), minimumSize: minimum)
         try expect(smaller.size == minimum, "Shrinking past the minimum must clamp both dimensions")
         try expect(smaller.minX == initial.minX && smaller.maxY == initial.maxY, "Clamping must keep the top-left corner fixed")
         let larger = StickyNoteLayout.resizedFrame(from: initial, delta: CGPoint(x: 40, y: -50), minimumSize: minimum)

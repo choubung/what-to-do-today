@@ -13,7 +13,7 @@ enum TodoApplication {
         let application = NSApplication.shared
         let delegate = TodoApplicationDelegate()
         application.delegate = delegate
-        application.setActivationPolicy(.regular)
+        application.setActivationPolicy(.accessory)
         withExtendedLifetime(delegate) { application.run() }
     }
 
@@ -38,10 +38,12 @@ enum TodoApplication {
 }
 
 @MainActor
-final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
+final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcurrency NSStatusItemExpandedInterfaceDelegate {
     private let model = TodoListModel()
     private var mainWindow: NSWindow?
     private var quickAddWindow: NSPanel?
+    private var statusItem: NSStatusItem?
+    private var statusPanel: TodoStatusPanel?
     private var openedFromURL = false
     private lazy var stickyNotes = StickyNoteCoordinator(model: model)
     private lazy var reminders = ReminderCoordinator(
@@ -56,6 +58,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenu()
+        configureStatusItem()
         _ = stickyNotes
         reminders.onOpenList = { [weak self] in self?.showMainWindow() }
         reminders.start()
@@ -102,6 +105,22 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func windowWillClose(_ notification: Notification) {
+        // AppKit sends this before updating the window's visibility.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !isPreparingToTerminate else { return }
+            let hasEditor = [mainWindow, quickAddWindow].contains {
+                $0?.isVisible == true || $0?.isMiniaturized == true
+            }
+            if !hasEditor { NSApp.setActivationPolicy(.accessory) }
+        }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard let panel = notification.object as? NSWindow, panel === statusPanel else { return }
+        statusItem?.expandedInterfaceSession?.cancel()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         reminders.stop()
         dayBoundaryTimer?.invalidate()
@@ -123,6 +142,10 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func hideAllStickyNotes() {
         Task { _ = await model.hideAllStickyNotes() }
+    }
+
+    private func restoreHiddenStickyNotes() {
+        Task { _ = await model.restoreHiddenStickyNotes() }
     }
 
     @objc private func closeKeyWindow(_ sender: Any?) {
@@ -171,6 +194,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showMainWindow() {
+        NSApp.setActivationPolicy(.regular)
         if mainWindow == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 460, height: 580),
@@ -182,6 +206,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
             window.contentView = NSHostingView(rootView: TodoListView(model: model, reminders: reminders))
             window.minSize = NSSize(width: 360, height: 380)
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.setFrameAutosaveName("TodoMainWindow")
             window.center()
             mainWindow = window
@@ -192,6 +217,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showQuickAdd() {
+        NSApp.setActivationPolicy(.regular)
         if let quickAddWindow, quickAddWindow.isVisible {
             quickAddWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -207,6 +233,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         panel.title = "새 할 일"
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
+        panel.delegate = self
         panel.contentView = NSHostingView(rootView: QuickAddView(model: model) { [weak panel] in
             panel?.close()
         })
@@ -214,6 +241,81 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         quickAddWindow = panel
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func configureStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "What to Do Today")
+        item.button?.toolTip = "What to Do Today"
+        item.expandedInterfaceDelegate = self
+        statusItem = item
+    }
+
+    func statusItem(_ statusItem: NSStatusItem, didBegin session: NSStatusItemExpandedInterfaceSession) {
+        guard let button = statusItem.button, let buttonWindow = button.window, let screen = buttonWindow.screen else {
+            session.cancel()
+            return
+        }
+        let panel = TodoStatusPanel(
+            contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false
+        )
+        panel.isReleasedWhenClosed = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isExcludedFromWindowsMenu = true
+        panel.level = .popUpMenu
+        // The menu belongs on the Space where its icon was clicked, even when
+        // a different application owns that full-screen Space.
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications, .ignoresCycle]
+        panel.delegate = self
+        panel.onCancel = { [weak session] in session?.cancel() }
+
+        let content = NSHostingView(rootView: VStack(alignment: .leading, spacing: 3) {
+            statusAction("할 일 목록 열기", icon: "checklist", action: showMainWindow)
+            statusAction("새 할 일", icon: "plus", action: showQuickAdd)
+            statusAction("포스트잇 모두 숨기기", icon: "eye.slash", action: hideAllStickyNotes)
+                .disabled(model.visibleStickyCount == 0 || model.isSaving)
+            statusAction("포스트잇 그대로 띄우기", icon: "eye", action: restoreHiddenStickyNotes)
+                .disabled(!model.canRestoreStickyNotes || model.isSaving)
+            Divider().padding(.vertical, 3)
+            statusAction("What to Do Today 종료", icon: "power") { NSApp.terminate(nil) }
+        }
+        .padding(8)
+        .frame(width: 225)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 13))
+        .allowsWindowActivationEvents())
+        panel.contentView = content
+        let size = content.fittingSize
+        let anchor = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let x = min(max(anchor.minX, screen.frame.minX + 4), screen.frame.maxX - size.width - 4)
+        panel.setFrame(NSRect(x: x, y: anchor.minY - size.height - 4, width: size.width, height: size.height), display: false)
+        statusPanel = panel
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func statusItemDidEndExpandedInterfaceSession(_ statusItem: NSStatusItem, animated: Bool) {
+        let panel = statusPanel
+        statusPanel = nil
+        panel?.delegate = nil
+        panel?.close()
+    }
+
+    private func statusAction(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button {
+            self.statusItem?.expandedInterfaceSession?.cancel()
+            action()
+        } label: {
+            Label(title, systemImage: icon)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.primary)
     }
 
     private func configureMenu() {
@@ -267,5 +369,15 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(windowItem)
         NSApp.mainMenu = menu
         NSApp.windowsMenu = windowMenu
+    }
+}
+
+private final class TodoStatusPanel: NSPanel {
+    var onCancel: (() -> Void)?
+
+    override var canBecomeKey: Bool { true }
+
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
     }
 }

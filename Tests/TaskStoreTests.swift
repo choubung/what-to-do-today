@@ -1082,7 +1082,34 @@ private enum TaskStoreTests {
             throw TestFailure(description: "Injected bulk failure did not fail")
         } catch TodoStoreError.database {}
         try expect(try store.fetchSnapshot().stickyNotes.isEmpty, "Bulk show must roll back the first note if a later insert fails")
+        try store.showStickyNotes(ids: [bulkA.id])
+        let beforeSwap = try store.fetchSnapshot()
+        do {
+            try store.setStickyNoteVisibility(showing: [bulkB.id], hiding: [bulkA.id])
+            throw TestFailure(description: "Injected show failure did not roll back a mixed update")
+        } catch TodoStoreError.database {}
+        try expect(try store.fetchSnapshot() == beforeSwap, "A failed show must roll back hides in the same update")
         try executeLegacySQL("DROP TRIGGER reject_second_note", at: databaseURL)
+        try store.setStickyNoteVisibility(showing: [bulkB.id], hiding: [bulkA.id])
+        let swapped = try store.fetchSnapshot()
+        try expect(swapped.tasks == beforeSwap.tasks, "Visibility updates must preserve task completion")
+        try expect(swapped.stickyNotes.filter(\.isVisible).map(\.id) == [bulkB.id], "One update must show and hide the requested notes")
+
+        let size = StickyNoteSize(width: 132, height: 104)
+        try store.saveStickySize(id: bulkB.id, size: size)
+        try store.saveStickyPosition(id: bulkB.id, position: position)
+        let completedWhileHidden = try store.addTask(title: "숨긴 동안 완료", showAsStickyNote: true)
+        try store.hideAllStickyNotes()
+        try store.hideAllStickyNotes()
+        let reopened = try TodoStore(databaseURL: databaseURL)
+        try expect(try reopened.fetchSnapshot().canRestoreStickyNotes, "An empty hide and app restart must preserve the last group")
+        try reopened.setCompleted(id: completedWhileHidden.id, completed: true)
+        try reopened.restoreHiddenStickyNotes()
+        let restoredGroup = try reopened.fetchSnapshot()
+        let visible = restoredGroup.stickyNotes.filter(\.isVisible)
+        try expect(visible.map(\.id) == [bulkB.id], "Restore must only show eligible notes from the saved group")
+        try expect(visible.first?.size == size && visible.first?.position == position, "Restore must preserve each note's size and position")
+        try expect(!restoredGroup.canRestoreStickyNotes, "Restoring must consume the saved group")
     }
 
     private static func testStickyNoteConcurrency(in directory: URL) throws {
