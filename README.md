@@ -16,10 +16,30 @@
   <sub>macOS 27.0.1 이상 · Xcode로 빌드하는 소스 배포</sub>
 </p>
 
+## 앱에서 목록 관리하기
+
+오늘 할 일과 한 일, 예정된 할 일을 한곳에서 관리합니다. 지난 완료 기록은 캘린더에서 찾아볼 수 있어요.
+
 <p align="center">
-  <img src="docs/images/app-preview.png" width="400" alt="오늘 할 일, 완료한 항목, 예정된 할 일을 보여주는 앱 화면">
-  <img src="docs/images/widget-preview.png" width="320" alt="미완료와 오늘 완료 항목, 카테고리와 페이지 번호가 보이는 바탕화면 중형 위젯">
+  <img src="docs/images/app-preview.png" width="480" alt="오늘 할 일, 완료한 항목, 예정된 할 일을 보여주는 앱 화면">
 </p>
+
+## 바탕화면 위젯으로 빠르게 체크하기
+
+앱을 열지 않고 바탕화면에서 할 일을 확인하고 완료를 체크합니다. 앱과 같은 목록을 사용하며, **＋**를 누르면 새 할 일을 적는 창이 열립니다.
+
+<table>
+  <tr>
+    <th align="left">중형 · 한 페이지에 3개</th>
+    <th align="left">대형 · 한 페이지에 8개</th>
+  </tr>
+  <tr>
+    <td valign="top"><img src="docs/images/widget-preview.png" width="320" alt="할 일 3개와 이전·다음 페이지 버튼이 보이는 중형 위젯"></td>
+    <td valign="top"><img src="docs/images/widget-large-preview.png" width="320" alt="할 일 8개와 이전·다음 페이지 버튼이 보이는 대형 위젯"></td>
+  </tr>
+</table>
+
+바탕화면 공간에 맞춰 크기를 고르세요. 목록이 길면 **이전**·**다음**으로 넘길 수 있습니다.
 
 ## 설치하고 시작하기
 
