@@ -104,6 +104,7 @@ struct TodoWidgetProvider: TimelineProvider {
 }
 
 struct TodoWidgetView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let entry: TodoWidgetEntry
 
     var body: some View {
@@ -165,7 +166,7 @@ struct TodoWidgetView: View {
                             }
                         }
                         .toggleStyle(.checkbox)
-                        .transition(.identity)
+                        .transition(reduceMotion ? .identity : .opacity)
                         .accessibilityLabel(task.title)
                         .accessibilityValue(
                             (task.isCompleted ? "완료" : "미완료")
@@ -173,6 +174,9 @@ struct TodoWidgetView: View {
                         )
                     }
                 }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: entry.tasks)
+                // Keep page navigation from animating task rows between unrelated pages.
+                .id(entry.page)
                 .transition(.identity)
                 Spacer(minLength: 0)
             }
@@ -200,7 +204,6 @@ struct TodoWidgetView: View {
             .font(.caption)
             .buttonStyle(.plain)
         }
-        .animation(nil, value: entry.tasks)
         .widgetURL(URL(string: "whattodotoday://open"))
         .containerBackground(.background, for: .widget)
     }
