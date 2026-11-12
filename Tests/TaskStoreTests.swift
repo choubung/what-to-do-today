@@ -75,6 +75,7 @@ private enum TaskStoreTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         try testCategoryOrder(in: directory)
+        try testWidgetCategoryOrder(in: directory)
 
         let startupFailures = ConcurrentFailures()
         // Opening an existing WAL database misses the initial journal-mode transition race.
@@ -758,6 +759,38 @@ private enum TaskStoreTests {
             try expect(try store.fetchTasks().count == fixtures.count, "Today filtering must retain every stored task")
             try expect(try store.fetchSnapshot().tasks.count == fixtures.count, "Unfiltered snapshot callers must retain their previous behavior")
         }
+    }
+
+    private static func testWidgetCategoryOrder(in directory: URL) throws {
+        let url = directory.appendingPathComponent("widget-category-order.sqlite")
+        let app = try TodoStore(databaseURL: url)
+        let widget = try TodoStore(databaseURL: url)
+        let defaultID = try app.fetchCategories()[0].id
+        let work = try app.createCategory(name: "업무")
+        let olderWork = try app.addTask(title: "업무 미완료 1", categoryID: work.id)
+        let newerWork = try app.addTask(title: "업무 미완료 2", categoryID: work.id)
+        let defaultTask = try app.addTask(title: "기본 미완료")
+        let doneWork = try app.addTask(title: "업무 완료", categoryID: work.id)
+        let doneDefault = try app.addTask(title: "기본 완료")
+        try executeLegacySQL("""
+            UPDATE todos SET created_at = 100 WHERE id = '\(olderWork.id.uuidString)';
+            UPDATE todos SET created_at = 200 WHERE id = '\(newerWork.id.uuidString)';
+            UPDATE todos SET created_at = 300 WHERE id = '\(defaultTask.id.uuidString)';
+            UPDATE todos SET completed_at = 400 WHERE id = '\(doneWork.id.uuidString)';
+            UPDATE todos SET completed_at = 500 WHERE id = '\(doneDefault.id.uuidString)';
+            """, at: url)
+        let day = DateInterval(start: Date(timeIntervalSince1970: 0), duration: 86_400)
+
+        try app.reorderCategories(ids: [work.id, defaultID])
+        let firstTwo = try widget.fetchPage(index: 0, pageSize: 2, dayRange: day)
+        try expect(firstTwo.tasks.map(\.id) == [newerWork.id, olderWork.id], "Apply category order before selecting the rows for each page")
+        let pages = try (0..<2).map { try widget.fetchPage(index: $0, pageSize: 3, dayRange: day) }
+        try expect(pages[0].tasks.map(\.id) == [newerWork.id, olderWork.id, defaultTask.id], "Category order takes priority over recency across categories")
+        try expect(pages[1].tasks.map(\.id) == [doneWork.id, doneDefault.id], "Completed rows follow the same category order after unfinished rows")
+
+        try app.reorderCategories(ids: [defaultID, work.id])
+        let updated = try widget.fetchPage(index: 0, pageSize: 8, dayRange: day)
+        try expect(updated.tasks.map(\.id) == [defaultTask.id, newerWork.id, olderWork.id, doneDefault.id, doneWork.id], "An open widget connection sees the new app category order")
     }
 
     private static func testPlannedTasks(in directory: URL) throws {
