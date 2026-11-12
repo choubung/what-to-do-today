@@ -1082,7 +1082,18 @@ private enum TaskStoreTests {
             throw TestFailure(description: "Injected bulk failure did not fail")
         } catch TodoStoreError.database {}
         try expect(try store.fetchSnapshot().stickyNotes.isEmpty, "Bulk show must roll back the first note if a later insert fails")
+        try store.showStickyNotes(ids: [bulkA.id])
+        let beforeSwap = try store.fetchSnapshot()
+        do {
+            try store.setStickyNoteVisibility(showing: [bulkB.id], hiding: [bulkA.id])
+            throw TestFailure(description: "Injected show failure did not roll back a mixed update")
+        } catch TodoStoreError.database {}
+        try expect(try store.fetchSnapshot() == beforeSwap, "A failed show must roll back hides in the same update")
         try executeLegacySQL("DROP TRIGGER reject_second_note", at: databaseURL)
+        try store.setStickyNoteVisibility(showing: [bulkB.id], hiding: [bulkA.id])
+        let swapped = try store.fetchSnapshot()
+        try expect(swapped.tasks == beforeSwap.tasks, "Visibility updates must preserve task completion")
+        try expect(swapped.stickyNotes.filter(\.isVisible).map(\.id) == [bulkB.id], "One update must show and hide the requested notes")
     }
 
     private static func testStickyNoteConcurrency(in directory: URL) throws {

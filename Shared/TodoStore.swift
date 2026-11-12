@@ -418,15 +418,25 @@ final class TodoStore: @unchecked Sendable {
     }
 
     func showStickyNotes(ids: [UUID]) throws {
-        try updateStickyNotes(ids: ids, sql: """
-            INSERT INTO sticky_notes (todo_id, is_visible)
-            SELECT id, 1 FROM todos WHERE id = ? AND completed_at IS NULL
-            ON CONFLICT(todo_id) DO UPDATE SET is_visible = 1
-            """)
+        try setStickyNoteVisibility(showing: ids, hiding: [])
     }
 
     func hideStickyNotes(ids: [UUID]) throws {
-        try updateStickyNotes(ids: ids, sql: "UPDATE sticky_notes SET is_visible = 0 WHERE todo_id = ?")
+        try setStickyNoteVisibility(showing: [], hiding: ids)
+    }
+
+    func setStickyNoteVisibility(showing: [UUID], hiding: [UUID]) throws {
+        guard !showing.isEmpty || !hiding.isEmpty else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        try withTransaction(readOnly: false) {
+            try updateStickyNotes(ids: hiding, sql: "UPDATE sticky_notes SET is_visible = 0 WHERE todo_id = ?")
+            try updateStickyNotes(ids: showing, sql: """
+                INSERT INTO sticky_notes (todo_id, is_visible)
+                SELECT id, 1 FROM todos WHERE id = ? AND completed_at IS NULL
+                ON CONFLICT(todo_id) DO UPDATE SET is_visible = 1
+                """)
+        }
     }
 
     func hideAllStickyNotes() throws {
@@ -879,16 +889,13 @@ final class TodoStore: @unchecked Sendable {
     }
 
     private func updateStickyNotes(ids: [UUID], sql: String) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        try withTransaction(readOnly: false) {
-            let statement = try prepare(sql)
-            defer { sqlite3_finalize(statement) }
-            for id in Set(ids) {
-                try bind(id.uuidString, to: statement, at: 1)
-                try finishWrite(statement)
-                try check(sqlite3_reset(statement))
-            }
+        guard !ids.isEmpty else { return }
+        let statement = try prepare(sql)
+        defer { sqlite3_finalize(statement) }
+        for id in Set(ids) {
+            try bind(id.uuidString, to: statement, at: 1)
+            try finishWrite(statement)
+            try check(sqlite3_reset(statement))
         }
     }
 

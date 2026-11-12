@@ -78,12 +78,8 @@ private actor TodoRepository {
         try connection().deleteTask(id: id)
     }
 
-    func showStickyNotes(ids: [UUID]) throws {
-        try connection().showStickyNotes(ids: ids)
-    }
-
-    func hideStickyNotes(ids: [UUID]) throws {
-        try connection().hideStickyNotes(ids: ids)
+    func setStickyNoteVisibility(showing: [UUID], hiding: [UUID]) throws {
+        try connection().setStickyNoteVisibility(showing: showing, hiding: hiding)
     }
 
     func hideAllStickyNotes() throws {
@@ -318,18 +314,20 @@ final class TodoListModel: ObservableObject {
     }
 
     func showStickyNotes(_ ids: [UUID]) async -> Bool {
-        guard !ids.isEmpty else { return true }
-        let succeeded = await save(reloadWidgets: false) {
-            try await self.repository.showStickyNotes(ids: ids)
-        }
-        if succeeded { onShowStickyNotes?(ids) }
-        return succeeded
+        await setStickyNoteVisibility(showing: ids, hiding: [])
     }
 
     func hideStickyNotes(_ ids: [UUID]) async -> Bool {
-        await save(reloadWidgets: false) {
-            try await self.repository.hideStickyNotes(ids: ids)
+        await setStickyNoteVisibility(showing: [], hiding: ids)
+    }
+
+    func setStickyNoteVisibility(showing: [UUID], hiding: [UUID]) async -> Bool {
+        guard !showing.isEmpty || !hiding.isEmpty else { return true }
+        let succeeded = await save(reloadWidgets: false) {
+            try await self.repository.setStickyNoteVisibility(showing: showing, hiding: hiding)
         }
+        if succeeded && !showing.isEmpty { onShowStickyNotes?(showing) }
+        return succeeded
     }
 
     func hideAllStickyNotes() async -> Bool {
