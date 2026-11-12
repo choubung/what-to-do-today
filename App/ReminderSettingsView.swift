@@ -6,7 +6,6 @@ import UserNotifications
 struct AppSettingsView: View {
     @ObservedObject var model: TodoListModel
     @State private var isSavingFontSize = false
-    @State private var showingStickyPicker = false
     @ObservedObject var coordinator: ReminderCoordinator
     @Environment(\.dismiss) private var dismiss
 
@@ -28,12 +27,8 @@ struct AppSettingsView: View {
                     .disabled(isSavingFontSize || model.isLoading || model.defaultStickyFontSize == StickyNoteTypography.defaultFontSize)
                     Text("개별 글자 크기를 지정한 포스트잇은 해당 설정을 따릅니다.")
                         .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        Button("선택해서 띄우기…") { showingStickyPicker = true }
-                            .disabled(model.incompleteTasks.isEmpty || model.isLoading || model.isSaving)
-                        Button("모두 숨기기") { Task { _ = await model.hideAllStickyNotes() } }
-                            .disabled(model.visibleStickyCount == 0 || model.isSaving)
-                    }
+                    Button("모두 숨기기") { Task { _ = await model.hideAllStickyNotes() } }
+                        .disabled(model.visibleStickyCount == 0 || model.isSaving)
                 }
                 .padding(8).frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -53,7 +48,6 @@ struct AppSettingsView: View {
         }
         .padding(24).frame(width: 440)
         .interactiveDismissDisabled(isSavingFontSize)
-        .sheet(isPresented: $showingStickyPicker) { StickyNotePickerView(model: model) }
         .task { await coordinator.refreshAccess() }
     }
 

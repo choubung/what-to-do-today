@@ -13,6 +13,7 @@ struct TodoListView: View {
     @State private var categoryMoveNotice: TodoCategory?
     @State private var showingCompletionHistory = false
     @State private var showingSettings = false
+    @State private var showingStickyPicker = false
     @State private var reminderTask: TodoItem?
     @Environment(\.controlActiveState) private var controlActiveState
 
@@ -27,6 +28,12 @@ struct TodoListView: View {
                     Label("이전 완료", systemImage: "calendar")
                 }
                 .buttonStyle(.borderless).controlSize(.small).disabled(model.isLoading)
+                Button { showingStickyPicker = true } label: {
+                    Image(systemName: "note")
+                }
+                .buttonStyle(.plain)
+                .help("포스트잇 띄우기").accessibilityLabel("포스트잇 띄우기")
+                .disabled(model.isLoading || model.isSaving || model.incompleteTasks.isEmpty)
                 Button { showingSettings = true } label: {
                     Image(systemName: "gearshape")
                 }
@@ -98,6 +105,9 @@ struct TodoListView: View {
         .sheet(isPresented: $showingSettings) {
             AppSettingsView(model: model, coordinator: reminders)
         }
+        .sheet(isPresented: $showingStickyPicker) {
+            StickyNotePickerView(model: model)
+        }
         .sheet(item: $reminderTask) { task in
             TodoReminderEditor(model: model, coordinator: reminders, taskID: task.id)
         }
@@ -114,7 +124,7 @@ struct TodoListView: View {
             Text(task.title)
         }
         .alert("처리하지 못했어요", isPresented: Binding(
-            get: { model.errorMessage != nil && !showingCompletionHistory && addingCategory == nil && editingTask == nil && reminderTask == nil && !showingSettings && !showingCategories && controlActiveState == .key },
+            get: { model.errorMessage != nil && !showingCompletionHistory && addingCategory == nil && editingTask == nil && reminderTask == nil && !showingSettings && !showingStickyPicker && !showingCategories && controlActiveState == .key },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
             Button("다시 불러오기") {
@@ -342,7 +352,9 @@ struct StickyNotePickerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedIDs: Set<UUID> = []
 
-    private var availableIDs: [UUID] { model.incompleteTasks.map(\.id) }
+    private var availableIDs: [UUID] {
+        model.incompleteTasks.filter { !model.isStickyVisible(for: $0.id) }.map(\.id)
+    }
     private var selectedCount: Int { selectedIDs.intersection(availableIDs).count }
 
     var body: some View {
@@ -370,8 +382,9 @@ struct StickyNotePickerView: View {
             } else {
                 List(model.incompleteTasks) { task in
                     Toggle(isOn: Binding(
-                        get: { selectedIDs.contains(task.id) },
+                        get: { selectedIDs.contains(task.id) && !model.isStickyVisible(for: task.id) },
                         set: { isSelected in
+                            guard !model.isStickyVisible(for: task.id) else { return }
                             if isSelected { selectedIDs.insert(task.id) }
                             else { selectedIDs.remove(task.id) }
                         }
@@ -388,7 +401,7 @@ struct StickyNotePickerView: View {
                         }
                     }
                     .toggleStyle(.checkbox)
-                    .disabled(model.isSaving)
+                    .disabled(model.isSaving || model.isStickyVisible(for: task.id))
                     .padding(.vertical, 4)
                     .listRowSeparator(.hidden)
                 }
