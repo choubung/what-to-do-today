@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.1.zip"><strong>v1.3.1 소스 ZIP 다운로드</strong></a>
+  <a href="https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.2.zip"><strong>v1.3.2 소스 ZIP 다운로드</strong></a>
   · <a href="docs/build.md">설치 안내</a>
   · <a href="https://github.com/choubung/what-to-do-today/releases/latest">최신 릴리즈</a><br>
   <sub>macOS 27.0.1 이상 · Xcode로 빌드하는 소스 배포</sub>
@@ -26,7 +26,7 @@
 
 ## 바탕화면 위젯으로 빠르게 체크하기
 
-앱을 열지 않고 바탕화면에서 할 일을 확인하고 완료를 체크합니다. 앱과 같은 목록을 사용하며, **＋**를 누르면 새 할 일을 적는 창이 열립니다.
+앱을 열지 않고 바탕화면에서 할 일을 확인하고 완료를 체크합니다. 체크하면 체크 표시와 제목의 삭제선이 함께 바뀌고, 완료한 항목은 아래로 이동합니다. **＋**를 누르면 새 할 일을 적는 창이 열립니다.
 
 <table>
   <tr>
