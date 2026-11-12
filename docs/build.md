@@ -1,6 +1,6 @@
 # 직접 빌드하기
 
-macOS 27.0.1 이상과 macOS 27 SDK를 포함한 Xcode가 필요합니다. [v1.3.2 소스 ZIP 다운로드](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.2.zip)에서 소스를 받고 압축을 푸세요.
+macOS 27.0.1 이상과 macOS 27 SDK를 포함한 Xcode가 필요합니다. [v1.3.3 소스 ZIP 다운로드](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.3.zip)에서 소스를 받고 압축을 푸세요.
 
 저장소 루트에 `Signing.xcconfig`를 만들고 Xcode 계정의 Team ID를 입력합니다.
 
@@ -49,4 +49,4 @@ xcodebuild -project WhatToDoToday.xcodeproj -scheme WhatToDoToday \
   -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
 ```
 
-바탕화면 설치와 App Group 접근 확인은 개발 팀으로 서명한 앱에서 수행해야 합니다. v1.3.2 빌드와 자동 테스트는 macOS 27.2.1에서 확인했습니다.
+바탕화면 설치와 App Group 접근 확인은 개발 팀으로 서명한 앱에서 수행해야 합니다. v1.3.3 빌드와 자동 테스트는 macOS 27.2.1에서 확인했습니다.

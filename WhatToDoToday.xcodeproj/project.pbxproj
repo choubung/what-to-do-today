@@ -440,8 +440,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.3.2";
-				"CURRENT_PROJECT_VERSION" = "20";
+				"MARKETING_VERSION" = "1.3.3";
+				"CURRENT_PROJECT_VERSION" = "21";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "TodoWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
@@ -472,8 +472,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.3.2";
-				"CURRENT_PROJECT_VERSION" = "20";
+				"MARKETING_VERSION" = "1.3.3";
+				"CURRENT_PROJECT_VERSION" = "21";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "TodoWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.choubung.whattodotoday.widget";
@@ -621,8 +621,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.3.2";
-				"CURRENT_PROJECT_VERSION" = "20";
+				"MARKETING_VERSION" = "1.3.3";
+				"CURRENT_PROJECT_VERSION" = "21";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "What to Do Today";
 				"PRODUCT_MODULE_NAME" = "WhatToDoToday";
@@ -651,8 +651,8 @@
 					"$(inherited)",
 					"-lsqlite3",
 				);
-				"MARKETING_VERSION" = "1.3.2";
-				"CURRENT_PROJECT_VERSION" = "20";
+				"MARKETING_VERSION" = "1.3.3";
+				"CURRENT_PROJECT_VERSION" = "21";
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"PRODUCT_NAME" = "What to Do Today";
 				"PRODUCT_MODULE_NAME" = "WhatToDoToday";
