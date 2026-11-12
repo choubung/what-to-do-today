@@ -149,6 +149,7 @@ final class TodoStore: @unchecked Sendable {
             return TodoSnapshot(
                 tasks: try readTasks(sql: taskListSQL(), dayRange: dayRange),
                 stickyNotes: try readStickyNotes(dayRange: dayRange),
+                canRestoreStickyNotes: try readCanRestoreStickyNotes(),
                 stickyNoteDefaultFontSize: try readDefaultStickyFontSize(),
                 categories: try readCategories(),
                 reminders: try readReminders(dayRange: includeUpcoming ? nil : dayRange),
@@ -442,7 +443,41 @@ final class TodoStore: @unchecked Sendable {
     func hideAllStickyNotes() throws {
         lock.lock()
         defer { lock.unlock() }
-        try execute("UPDATE sticky_notes SET is_visible = 0")
+        try withTransaction(readOnly: false) {
+            try execute("""
+                DELETE FROM sticky_note_restore WHERE EXISTS (SELECT 1 FROM sticky_notes WHERE is_visible = 1);
+                INSERT OR IGNORE INTO sticky_note_restore (todo_id)
+                SELECT todo_id FROM sticky_notes WHERE is_visible = 1;
+                UPDATE sticky_notes SET is_visible = 0 WHERE is_visible = 1;
+                """)
+        }
+    }
+
+    func restoreHiddenStickyNotes() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try withTransaction(readOnly: false) {
+            try execute("""
+                UPDATE sticky_notes SET is_visible = 1
+                WHERE todo_id IN (SELECT todo_id FROM sticky_note_restore)
+                    AND EXISTS (SELECT 1 FROM todos WHERE id = sticky_notes.todo_id AND completed_at IS NULL);
+                DELETE FROM sticky_note_restore;
+                """)
+        }
+    }
+
+    private func readCanRestoreStickyNotes() throws -> Bool {
+        let statement = try prepare("""
+            SELECT EXISTS (
+                SELECT 1 FROM sticky_note_restore
+                JOIN sticky_notes USING (todo_id)
+                JOIN todos ON todos.id = sticky_notes.todo_id
+                WHERE is_visible = 0 AND completed_at IS NULL
+            )
+            """)
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw databaseError() }
+        return sqlite3_column_int(statement, 0) != 0
     }
 
     func setStickyAlwaysOnTop(id: UUID, value: Bool) throws {
@@ -736,6 +771,9 @@ final class TodoStore: @unchecked Sendable {
                     \(colorColumn),
                     CHECK ((position_x IS NULL AND position_y IS NULL)
                         OR (position_x IS NOT NULL AND position_y IS NOT NULL))
+                );
+                CREATE TABLE IF NOT EXISTS sticky_note_restore (
+                    todo_id TEXT PRIMARY KEY NOT NULL REFERENCES sticky_notes(todo_id) ON DELETE CASCADE
                 );
                 CREATE TABLE IF NOT EXISTS todo_reminders (
                     todo_id TEXT PRIMARY KEY NOT NULL REFERENCES todos(id) ON DELETE CASCADE,

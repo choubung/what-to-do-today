@@ -86,6 +86,10 @@ private actor TodoRepository {
         try connection().hideAllStickyNotes()
     }
 
+    func restoreHiddenStickyNotes() throws {
+        try connection().restoreHiddenStickyNotes()
+    }
+
     func setStickyAlwaysOnTop(id: UUID, value: Bool) throws {
         try connection().setStickyAlwaysOnTop(id: id, value: value)
     }
@@ -152,6 +156,7 @@ final class TodoListModel: ObservableObject {
     var incompleteTasks: [TodoItem] { tasks.filter { !$0.isCompleted } }
     var completedTasks: [TodoItem] { tasks.filter(\.isCompleted) }
     var visibleStickyCount: Int { stickyNotes.filter(\.isVisible).count }
+    var canRestoreStickyNotes: Bool { snapshot.canRestoreStickyNotes }
     var defaultStickyFontSize: Double { snapshot.stickyNoteDefaultFontSize }
 
     func categoryName(for task: TodoItem) -> String? {
@@ -333,6 +338,12 @@ final class TodoListModel: ObservableObject {
     func hideAllStickyNotes() async -> Bool {
         await save(reloadWidgets: false) {
             try await self.repository.hideAllStickyNotes()
+        }
+    }
+
+    func restoreHiddenStickyNotes() async -> Bool {
+        await save(reloadWidgets: false) {
+            try await self.repository.restoreHiddenStickyNotes()
         }
     }
 

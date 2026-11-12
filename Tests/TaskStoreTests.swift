@@ -1094,6 +1094,22 @@ private enum TaskStoreTests {
         let swapped = try store.fetchSnapshot()
         try expect(swapped.tasks == beforeSwap.tasks, "Visibility updates must preserve task completion")
         try expect(swapped.stickyNotes.filter(\.isVisible).map(\.id) == [bulkB.id], "One update must show and hide the requested notes")
+
+        let size = StickyNoteSize(width: 132, height: 104)
+        try store.saveStickySize(id: bulkB.id, size: size)
+        try store.saveStickyPosition(id: bulkB.id, position: position)
+        let completedWhileHidden = try store.addTask(title: "숨긴 동안 완료", showAsStickyNote: true)
+        try store.hideAllStickyNotes()
+        try store.hideAllStickyNotes()
+        let reopened = try TodoStore(databaseURL: databaseURL)
+        try expect(try reopened.fetchSnapshot().canRestoreStickyNotes, "An empty hide and app restart must preserve the last group")
+        try reopened.setCompleted(id: completedWhileHidden.id, completed: true)
+        try reopened.restoreHiddenStickyNotes()
+        let restoredGroup = try reopened.fetchSnapshot()
+        let visible = restoredGroup.stickyNotes.filter(\.isVisible)
+        try expect(visible.map(\.id) == [bulkB.id], "Restore must only show eligible notes from the saved group")
+        try expect(visible.first?.size == size && visible.first?.position == position, "Restore must preserve each note's size and position")
+        try expect(!restoredGroup.canRestoreStickyNotes, "Restoring must consume the saved group")
     }
 
     private static func testStickyNoteConcurrency(in directory: URL) throws {

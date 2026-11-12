@@ -144,6 +144,10 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDe
         Task { _ = await model.hideAllStickyNotes() }
     }
 
+    private func restoreHiddenStickyNotes() {
+        Task { _ = await model.restoreHiddenStickyNotes() }
+    }
+
     @objc private func closeKeyWindow(_ sender: Any?) {
         (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(sender)
     }
@@ -273,7 +277,9 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDe
             statusAction("할 일 목록 열기", icon: "checklist", action: showMainWindow)
             statusAction("새 할 일", icon: "plus", action: showQuickAdd)
             statusAction("포스트잇 모두 숨기기", icon: "eye.slash", action: hideAllStickyNotes)
-                .disabled(model.visibleStickyCount == 0)
+                .disabled(model.visibleStickyCount == 0 || model.isSaving)
+            statusAction("포스트잇 그대로 띄우기", icon: "eye", action: restoreHiddenStickyNotes)
+                .disabled(!model.canRestoreStickyNotes || model.isSaving)
             Divider().padding(.vertical, 3)
             statusAction("What to Do Today 종료", icon: "power") { NSApp.terminate(nil) }
         }
@@ -284,7 +290,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDe
         panel.contentView = content
         let size = content.fittingSize
         let anchor = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
-        let x = min(max(anchor.midX - size.width / 2, screen.frame.minX + 4), screen.frame.maxX - size.width - 4)
+        let x = min(max(anchor.minX, screen.frame.minX + 4), screen.frame.maxX - size.width - 4)
         panel.setFrame(NSRect(x: x, y: anchor.minY - size.height - 4, width: size.width, height: size.height), display: false)
         statusPanel = panel
         panel.makeKeyAndOrderFront(nil)
