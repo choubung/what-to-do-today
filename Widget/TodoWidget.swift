@@ -142,36 +142,31 @@ struct TodoWidgetView: View {
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(entry.tasks) { task in
-                        Toggle(
-                            isOn: task.isCompleted,
-                            intent: SetTodoCompletionIntent(
-                                taskID: task.id,
-                                completed: !task.isCompleted,
-                                familyKey: entry.familyKey
-                            )
-                        ) {
-                            HStack(spacing: 6) {
+                        HStack(spacing: 6) {
+                            Toggle(
+                                isOn: task.isCompleted,
+                                intent: SetTodoCompletionIntent(
+                                    taskID: task.id,
+                                    completed: !task.isCompleted,
+                                    familyKey: entry.familyKey
+                                )
+                            ) {
                                 Text(task.title)
-                                .font(.subheadline)
-                                .contentTransition(.identity)
-                                .foregroundStyle(task.isCompleted ? .secondary : .primary)
-                                .strikethrough(task.isCompleted)
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                if let id = task.categoryID, let name = entry.categoryNames[id] {
-                                    Text(name).font(.caption2).foregroundStyle(.secondary)
-                                        .lineLimit(1).frame(maxWidth: 70, alignment: .trailing)
-                                }
-
+                                    .font(.subheadline)
+                                    .contentTransition(.identity)
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .toggleStyle(TodoCompletionToggleStyle(
+                                categoryName: task.categoryID.flatMap { entry.categoryNames[$0] }
+                            ))
+                            .accessibilityLabel(task.title)
+                            if let id = task.categoryID, let name = entry.categoryNames[id] {
+                                Text(name).font(.caption2).foregroundStyle(.secondary)
+                                    .lineLimit(1).frame(maxWidth: 70, alignment: .trailing)
                             }
                         }
-                        .toggleStyle(.checkbox)
                         .transition(reduceMotion ? .identity : .opacity)
-                        .accessibilityLabel(task.title)
-                        .accessibilityValue(
-                            (task.isCompleted ? "완료" : "미완료")
-                            + (task.categoryID.flatMap { entry.categoryNames[$0] }.map { ", \($0)" } ?? "")
-                        )
                     }
                 }
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: entry.tasks)
@@ -224,6 +219,24 @@ struct TodoWidgetView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+}
+
+/// WidgetKit pre-renders both configurations for immediate feedback while the intent saves.
+/// Derive the entire completion appearance from this configuration, not the old timeline entry.
+struct TodoCompletionToggleStyle: ToggleStyle {
+    var categoryName: String?
+
+    func makeBody(configuration: Configuration) -> some View {
+        Toggle(configuration)
+            .toggleStyle(.checkbox)
+            .foregroundStyle(configuration.isOn ? .secondary : .primary)
+            .strikethrough(configuration.isOn)
+            .animation(nil, value: configuration.isOn)
+            .accessibilityValue(
+                (configuration.isOn ? "완료" : "미완료")
+                + (categoryName.map { ", \($0)" } ?? "")
+            )
     }
 }
 
