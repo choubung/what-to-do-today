@@ -17,7 +17,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/app-preview.png" width="480" alt="오늘 할 일, 완료한 항목, 예정된 할 일을 보여주는 앱 화면">
+  <img src="docs/images/app-preview.png" width="400" alt="오늘 할 일, 완료한 항목, 예정된 할 일을 보여주는 앱 화면">
+  <img src="docs/images/widget-preview.png" width="320" alt="미완료와 오늘 완료 항목, 카테고리와 페이지 번호가 보이는 바탕화면 중형 위젯">
 </p>
 
 ## 설치하고 시작하기
