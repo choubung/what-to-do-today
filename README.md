@@ -34,8 +34,8 @@
     <th align="left">대형 · 한 페이지에 8개</th>
   </tr>
   <tr>
-    <td valign="top"><img src="docs/images/widget-preview.png" width="320" alt="배경화면이 비치는 실제 macOS 중형 위젯: 할 일 3개와 페이지 이동 버튼"></td>
-    <td valign="top"><img src="docs/images/widget-large-preview.png" width="320" alt="배경화면이 비치는 실제 macOS 대형 위젯: 미완료와 완료 항목 6개"></td>
+    <td valign="top"><img src="docs/images/widget-medium-desktop-glass.png" width="320" alt="배경화면이 비치는 실제 macOS 중형 위젯: 할 일 3개와 페이지 이동 버튼"></td>
+    <td valign="top"><img src="docs/images/widget-large-desktop-glass.png" width="320" alt="배경화면이 비치는 실제 macOS 대형 위젯: 미완료와 완료 항목 6개"></td>
   </tr>
 </table>
 
