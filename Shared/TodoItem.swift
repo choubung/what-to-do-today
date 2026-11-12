@@ -6,12 +6,14 @@ struct TodoCategory: Identifiable, Equatable, Sendable {
     let isDefault: Bool
     /// Includes completed tasks outside today's list, so deletion previews remain accurate.
     let taskCount: Int
+    let stickyColorHex: String?
 
-    init(id: UUID, name: String, isDefault: Bool = false, taskCount: Int = 0) {
+    init(id: UUID, name: String, isDefault: Bool = false, taskCount: Int = 0, stickyColorHex: String? = nil) {
         self.id = id
         self.name = name
         self.isDefault = isDefault
         self.taskCount = taskCount
+        self.stickyColorHex = stickyColorHex
     }
 
     static let maximumNameLength = 30

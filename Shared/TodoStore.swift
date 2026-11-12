@@ -507,6 +507,28 @@ final class TodoStore: @unchecked Sendable {
         try finishWrite(statement)
     }
 
+    func saveCategoryStickyColor(id: UUID, colorHex: String?) throws {
+        let normalized: String?
+        if let colorHex {
+            guard let color = StickyNoteColor(hex: colorHex) else { throw TodoStoreError.invalidColor }
+            normalized = color.hex
+        } else {
+            normalized = nil
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        let statement = try prepare("UPDATE categories SET sticky_color_hex = ? WHERE id = ?")
+        defer { sqlite3_finalize(statement) }
+        if let normalized {
+            try bind(normalized, to: statement, at: 1)
+        } else {
+            try check(sqlite3_bind_null(statement, 1))
+        }
+        try bind(id.uuidString, to: statement, at: 2)
+        try finishWrite(statement)
+        guard sqlite3_changes(database) > 0 else { throw TodoStoreError.missingCategory }
+    }
+
     func saveStickyColor(id: UUID, colorHex: String?) throws {
         let normalized: String?
         if let colorHex {
@@ -754,6 +776,9 @@ final class TodoStore: @unchecked Sendable {
             }
             try execute("CREATE INDEX IF NOT EXISTS todos_category ON todos(category_id)")
             try execute("CREATE INDEX IF NOT EXISTS todos_completion_date ON todos(completed_at DESC, id ASC)")
+            if try !tableColumns("categories").contains("sticky_color_hex") {
+                try execute("ALTER TABLE categories ADD COLUMN sticky_color_hex TEXT CHECK (sticky_color_hex IS NULL OR (length(sticky_color_hex) = 7 AND substr(sticky_color_hex, 1, 1) = '#' AND substr(sticky_color_hex, 2) NOT GLOB '*[^0-9A-F]*'))")
+            }
             try configureRequiredCategories()
             if try !tableColumns("categories").contains("sort_order") {
                 try execute("ALTER TABLE categories ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
@@ -869,7 +894,8 @@ final class TodoStore: @unchecked Sendable {
 
     private func readStickyNotes(dayRange: DateInterval?) throws -> [StickyNoteState] {
         let statement = try prepare("""
-            SELECT todo_id, is_visible, is_always_on_top, position_x, position_y, display_id, width, height, font_size, color_hex
+            SELECT todo_id, is_visible, is_always_on_top, position_x, position_y, display_id, width, height, font_size, color_hex,
+                (SELECT sticky_color_hex FROM categories WHERE id = todos.category_id)
             FROM sticky_notes JOIN todos ON todos.id = sticky_notes.todo_id
             \(dayFilter)
             ORDER BY todo_id
@@ -929,7 +955,8 @@ final class TodoStore: @unchecked Sendable {
                 position: position,
                 size: size,
                 fontSize: fontSize,
-                colorHex: colorHex
+                colorHex: colorHex,
+                categoryColorHex: sqlite3_column_type(statement, 10) == SQLITE_NULL ? nil : stringColumn(statement, index: 10)
             ))
             result = sqlite3_step(statement)
         }
@@ -1058,7 +1085,7 @@ final class TodoStore: @unchecked Sendable {
     private func readCategories() throws -> [TodoCategory] {
         let statement = try prepare("""
             SELECT c.id, c.name, c.id = s.default_category_id,
-                (SELECT COUNT(*) FROM todos t WHERE t.category_id = c.id)
+                (SELECT COUNT(*) FROM todos t WHERE t.category_id = c.id), c.sticky_color_hex
             FROM categories c JOIN category_settings s ON s.singleton = 1
             ORDER BY \(categoryOrder)
             """)
@@ -1072,7 +1099,8 @@ final class TodoStore: @unchecked Sendable {
             categories.append(TodoCategory(
                 id: id, name: stringColumn(statement, index: 1),
                 isDefault: sqlite3_column_int(statement, 2) != 0,
-                taskCount: Int(sqlite3_column_int64(statement, 3))
+                taskCount: Int(sqlite3_column_int64(statement, 3)),
+                stickyColorHex: sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : stringColumn(statement, index: 4)
             ))
             result = sqlite3_step(statement)
         }

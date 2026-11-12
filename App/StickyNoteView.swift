@@ -40,7 +40,7 @@ struct StickyNoteView: View {
 
     private var fontSize: Double { model.effectiveStickyFontSize(for: note) }
     private var noteColorScheme: ColorScheme {
-        guard let hex = note.colorHex, let color = StickyNoteColor(hex: hex) else { return colorScheme }
+        guard let hex = note.effectiveColorHex, let color = StickyNoteColor(hex: hex) else { return colorScheme }
         return color.usesDarkText ? .light : .dark
     }
 
@@ -86,7 +86,7 @@ struct StickyNoteView: View {
                     HStack(alignment: .top, spacing: 8) {
                         Text(error)
                             .font(.caption)
-                            .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: note.colorHex)))
+                            .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: note.effectiveColorHex)))
                             .lineLimit(3)
                         Spacer(minLength: 0)
                         Button("확인") { model.errorMessage = nil }
@@ -100,14 +100,19 @@ struct StickyNoteView: View {
             .padding(.bottom, 14)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: note.colorHex)))
-        .background(Color(nsColor: StickyNoteAppearance.background(for: note.colorHex)))
+        .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: note.effectiveColorHex)))
+        .background(Color(nsColor: StickyNoteAppearance.background(for: note.effectiveColorHex)))
         .environment(\.colorScheme, noteColorScheme)
         .contentShape(Rectangle())
         .contextMenu { noteContextMenu }
+        .overlay(alignment: .bottomTrailing) {
+            StickyNoteResizeHandle(color: StickyNoteAppearance.foreground(for: note.effectiveColorHex))
+                .frame(width: 24, height: 24)
+                .padding(2)
+        }
         .allowsWindowActivationEvents()
         .popover(isPresented: $isEditingColor) {
-            StickyNoteColorEditor(initialHex: note.colorHex) { colorHex in
+            StickyNoteColorEditor(initialHex: note.colorHex, defaultLabel: "카테고리 색상", inheritedHex: note.categoryColorHex) { colorHex in
                 await model.setStickyColor(id: task.id, colorHex: colorHex)
             }
             .environment(\.colorScheme, colorScheme)
@@ -212,26 +217,34 @@ struct StickyNoteView: View {
     }
 }
 
-private struct StickyNoteColorEditor: View {
+struct StickyNoteColorEditor: View {
     let save: (String?) async -> Bool
     @State private var selectedHex: String?
     @State private var isSaving = false
     @State private var saveFailed = false
     @Environment(\.dismiss) private var dismiss
 
+    let defaultLabel: String
+    let inheritedHex: String?
+    let title: String
+    private var previewHex: String? { selectedHex ?? inheritedHex }
+
     private let presets: [(name: String, hex: String?)] = [
-        ("기본 노랑", nil), ("분홍", "#FBE4E8"), ("파랑", "#E0EDFC"),
+        ("노랑", "#FFF7D4"), ("분홍", "#FBE4E8"), ("파랑", "#E0EDFC"),
         ("민트", "#E0F3E7"), ("보라", "#ECE4FA"), ("회색", "#EBECEF")
     ]
 
-    init(initialHex: String?, save: @escaping (String?) async -> Bool) {
+    init(initialHex: String?, defaultLabel: String = "기본 노랑", inheritedHex: String? = nil, title: String = "포스트잇 색상", save: @escaping (String?) async -> Bool) {
         self.save = save
+        self.defaultLabel = defaultLabel
+        self.inheritedHex = inheritedHex
+        self.title = title
         _selectedHex = State(initialValue: initialHex)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("포스트잇 색상").font(.headline)
+            Text(title).font(.headline)
 
             HStack(spacing: 10) {
                 ForEach(presets, id: \.name) { preset in
@@ -258,15 +271,15 @@ private struct StickyNoteColorEditor: View {
             }
 
             ColorPicker("사용자 지정", selection: Binding(
-                get: { Color(nsColor: StickyNoteAppearance.background(for: selectedHex)) },
+                get: { Color(nsColor: StickyNoteAppearance.background(for: previewHex)) },
                 set: { if let hex = StickyNoteAppearance.hex(from: $0) { selectedHex = hex } }
             ), supportsOpacity: false)
 
             Text("할 일이 잘 보이는 색상")
                 .font(.body)
-                .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: selectedHex)))
+                .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: previewHex)))
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(Color(nsColor: StickyNoteAppearance.background(for: selectedHex)), in: RoundedRectangle(cornerRadius: 8))
+                .background(Color(nsColor: StickyNoteAppearance.background(for: previewHex)), in: RoundedRectangle(cornerRadius: 8))
 
             if saveFailed {
                 Text("색상을 저장하지 못했어요. 다시 시도해 주세요.")
@@ -275,7 +288,8 @@ private struct StickyNoteColorEditor: View {
             }
 
             HStack {
-                Button("기본 색상") { selectedHex = nil }
+                Button(defaultLabel) { selectedHex = nil }
+                    .disabled(selectedHex == nil)
                 Spacer()
                 Button("취소") { dismiss() }
                     .keyboardShortcut(.cancelAction)
@@ -298,6 +312,70 @@ private struct StickyNoteColorEditor: View {
         .disabled(isSaving)
         .padding(20)
         .frame(width: 300)
+    }
+}
+
+/// The visible grip is only 8 pt; its 24 pt target is easier to acquire.
+private struct StickyNoteResizeHandle: NSViewRepresentable {
+    let color: NSColor
+
+    func makeNSView(context: Context) -> ResizeView { ResizeView() }
+    func updateNSView(_ view: ResizeView, context: Context) {
+        view.gripColor = color.withAlphaComponent(0.35)
+        view.needsDisplay = true
+    }
+
+    final class ResizeView: NSView {
+        var gripColor = NSColor.secondaryLabelColor
+        private var dragStart: (pointer: CGPoint, frame: CGRect)?
+        private let resizeCursor = NSCursor.frameResize(position: .bottomRight, directions: .all)
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            toolTip = "드래그해서 포스트잇 크기 조절"
+            setAccessibilityLabel("포스트잇 크기 조절")
+        }
+
+        required init?(coder: NSCoder) { nil }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var needsPanelToBecomeKey: Bool { true }
+        override var acceptsFirstResponder: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func draw(_ dirtyRect: NSRect) {
+            gripColor.setStroke()
+            let path = NSBezierPath()
+            path.lineWidth = 1
+            path.lineCapStyle = .round
+            for length: CGFloat in [4, 8] {
+                path.move(to: CGPoint(x: bounds.maxX - 6 - length, y: bounds.minY + 6))
+                path.line(to: CGPoint(x: bounds.maxX - 6, y: bounds.minY + 6 + length))
+            }
+            path.stroke()
+        }
+
+        override func resetCursorRects() { addCursorRect(bounds, cursor: resizeCursor) }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            dragStart = (window.convertPoint(toScreen: event.locationInWindow), window.frame)
+            resizeCursor.push()
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let window, let dragStart else { return }
+            let pointer = window.convertPoint(toScreen: event.locationInWindow)
+            let delta = CGPoint(x: pointer.x - dragStart.pointer.x, y: pointer.y - dragStart.pointer.y)
+            window.setFrame(StickyNoteLayout.resizedFrame(from: dragStart.frame, delta: delta, minimumSize: window.minSize), display: true)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard dragStart != nil else { return }
+            mouseDragged(with: event)
+            dragStart = nil
+            NSCursor.pop()
+            window?.invalidateCursorRects(for: self)
+        }
     }
 }
 

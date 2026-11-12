@@ -37,6 +37,46 @@ private final class ConcurrentFailures: @unchecked Sendable {
 
 @main
 private enum TaskStoreTests {
+    private static func testCategoryStickyColors(in directory: URL) throws {
+        let url = directory.appendingPathComponent("category-colors.sqlite")
+        let store = try TodoStore(databaseURL: url)
+        let work = try store.createCategory(name: "업무")
+        let home = try store.createCategory(name: "개인")
+        let task = try store.addTask(title: "색상 상속", categoryID: work.id, showAsStickyNote: true)
+        let custom = try store.addTask(title: "개별 색상", categoryID: work.id, showAsStickyNote: true)
+        try store.saveStickyColor(id: custom.id, colorHex: "#123456")
+        // An existing database without the new column must keep task and note data on upgrade.
+        try executeLegacySQL("ALTER TABLE categories DROP COLUMN sticky_color_hex", at: url)
+        let upgraded = try TodoStore(databaseURL: url)
+        try expect(try upgraded.fetchSnapshot().stickyNotes.first { $0.id == custom.id }?.colorHex == "#123456", "Migration preserves individual colors")
+        try upgraded.saveCategoryStickyColor(id: work.id, colorHex: "#aabbcc")
+        try upgraded.saveCategoryStickyColor(id: home.id, colorHex: "#E0F3E7")
+        func note(_ id: UUID) throws -> StickyNoteState {
+            try upgraded.fetchSnapshot().stickyNotes.first { $0.id == id }!
+        }
+        try expect(try note(task.id).effectiveColorHex == "#AABBCC", "Existing uncolored notes inherit normalized category color")
+        try expect(try note(custom.id).effectiveColorHex == "#123456", "Individual colors take precedence")
+        try upgraded.saveCategoryStickyColor(id: work.id, colorHex: "#ECE4FA")
+        try expect(try note(task.id).effectiveColorHex == "#ECE4FA", "Category changes update inherited color")
+        try upgraded.setCategory(id: task.id, categoryID: home.id)
+        try expect(try note(task.id).effectiveColorHex == "#E0F3E7", "Moving a task follows its destination color")
+        try upgraded.saveStickyColor(id: custom.id, colorHex: nil)
+        try expect(try note(custom.id).effectiveColorHex == "#ECE4FA", "Resetting individual color restores inheritance")
+        try upgraded.deleteCategory(id: work.id, movingTasksTo: home.id)
+        try expect(try note(custom.id).effectiveColorHex == "#E0F3E7", "Category deletion adopts destination color")
+        try expect(try TodoStore(databaseURL: url).fetchCategories().first { $0.id == home.id }?.stickyColorHex == "#E0F3E7", "Category color survives reopening")
+        do {
+            try upgraded.saveCategoryStickyColor(id: home.id, colorHex: "invalid")
+            throw TestFailure(description: "Invalid category color accepted")
+        } catch TodoStoreError.invalidColor {}
+        do {
+            try upgraded.saveCategoryStickyColor(id: UUID(), colorHex: nil)
+            throw TestFailure(description: "Missing category silently accepted")
+        } catch TodoStoreError.missingCategory {}
+        try upgraded.saveCategoryStickyColor(id: home.id, colorHex: nil)
+        try expect(try note(task.id).effectiveColorHex == nil, "Reset category color restores system default")
+    }
+
     private static func testCategoryOrder(in directory: URL) throws {
         let url = directory.appendingPathComponent("category-order.sqlite")
         let store = try TodoStore(databaseURL: url)
@@ -74,6 +114,7 @@ private enum TaskStoreTests {
             .appendingPathComponent("what-to-do-today-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
 
+        try testCategoryStickyColors(in: directory)
         try testCategoryOrder(in: directory)
         try testWidgetCategoryOrder(in: directory)
 
