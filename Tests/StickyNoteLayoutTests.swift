@@ -12,6 +12,7 @@ private func expect(_ condition: @autoclosure () -> Bool, _ message: String) thr
 @main
 private enum StickyNoteLayoutTests {
     static func main() throws {
+        try checkResizeTargets()
         let main = StickyNoteLayout.Screen(
             id: "main", visibleFrame: CGRect(x: 0, y: 40, width: 1440, height: 840), isPrimary: true
         )
@@ -82,5 +83,18 @@ private enum StickyNoteLayoutTests {
         let invalidOrigin = StickyNoteLayout.placement(savedOrigin: CGPoint(x: CGFloat.nan, y: 0), displayID: nil, size: size, screens: [main])!
         try expect(main.visibleFrame.contains(invalidOrigin.frame), "Invalid stored coordinates should use a safe default")
         print("Passed sticky-note position/size restore, minimum size, monitor removal, negative coordinates, bounds, and cascade tests.")
+    }
+
+    private static func checkResizeTargets() throws {
+        let initial = CGRect(x: -500, y: 100, width: 280, height: 190)
+        let minimum = StickyNoteLayout.minimumSize
+        let smaller = StickyNoteLayout.resizedFrame(from: initial, delta: CGPoint(x: -100, y: 100), minimumSize: minimum)
+        try expect(smaller.size == minimum, "Shrinking past the minimum must clamp both dimensions")
+        try expect(smaller.minX == initial.minX && smaller.maxY == initial.maxY, "Clamping must keep the top-left corner fixed")
+        let larger = StickyNoteLayout.resizedFrame(from: initial, delta: CGPoint(x: 40, y: -50), minimumSize: minimum)
+        try expect(larger == CGRect(x: -500, y: 50, width: 320, height: 240), "Diagonal resize must follow both screen-space deltas")
+        let unchanged = StickyNoteLayout.resizedFrame(from: initial, delta: .zero, minimumSize: minimum)
+        try expect(unchanged == initial, "Clicking without dragging must not change geometry")
+        print("Passed bottom-right resize, minimum size, anchored corner, and screen-space resize tests.")
     }
 }

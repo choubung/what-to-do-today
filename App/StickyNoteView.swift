@@ -105,6 +105,11 @@ struct StickyNoteView: View {
         .environment(\.colorScheme, noteColorScheme)
         .contentShape(Rectangle())
         .contextMenu { noteContextMenu }
+        .overlay(alignment: .bottomTrailing) {
+            StickyNoteResizeHandle(color: StickyNoteAppearance.foreground(for: note.effectiveColorHex))
+                .frame(width: 24, height: 24)
+                .padding(2)
+        }
         .allowsWindowActivationEvents()
         .popover(isPresented: $isEditingColor) {
             StickyNoteColorEditor(initialHex: note.colorHex, defaultLabel: "카테고리 색상", inheritedHex: note.categoryColorHex) { colorHex in
@@ -307,6 +312,70 @@ struct StickyNoteColorEditor: View {
         .disabled(isSaving)
         .padding(20)
         .frame(width: 300)
+    }
+}
+
+/// The visible grip is only 8 pt; its 24 pt target is easier to acquire.
+private struct StickyNoteResizeHandle: NSViewRepresentable {
+    let color: NSColor
+
+    func makeNSView(context: Context) -> ResizeView { ResizeView() }
+    func updateNSView(_ view: ResizeView, context: Context) {
+        view.gripColor = color.withAlphaComponent(0.35)
+        view.needsDisplay = true
+    }
+
+    final class ResizeView: NSView {
+        var gripColor = NSColor.secondaryLabelColor
+        private var dragStart: (pointer: CGPoint, frame: CGRect)?
+        private let resizeCursor = NSCursor.frameResize(position: .bottomRight, directions: .all)
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            toolTip = "드래그해서 포스트잇 크기 조절"
+            setAccessibilityLabel("포스트잇 크기 조절")
+        }
+
+        required init?(coder: NSCoder) { nil }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var needsPanelToBecomeKey: Bool { true }
+        override var acceptsFirstResponder: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func draw(_ dirtyRect: NSRect) {
+            gripColor.setStroke()
+            let path = NSBezierPath()
+            path.lineWidth = 1
+            path.lineCapStyle = .round
+            for length: CGFloat in [4, 8] {
+                path.move(to: CGPoint(x: bounds.maxX - 6 - length, y: bounds.minY + 6))
+                path.line(to: CGPoint(x: bounds.maxX - 6, y: bounds.minY + 6 + length))
+            }
+            path.stroke()
+        }
+
+        override func resetCursorRects() { addCursorRect(bounds, cursor: resizeCursor) }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            dragStart = (window.convertPoint(toScreen: event.locationInWindow), window.frame)
+            resizeCursor.push()
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let window, let dragStart else { return }
+            let pointer = window.convertPoint(toScreen: event.locationInWindow)
+            let delta = CGPoint(x: pointer.x - dragStart.pointer.x, y: pointer.y - dragStart.pointer.y)
+            window.setFrame(StickyNoteLayout.resizedFrame(from: dragStart.frame, delta: delta, minimumSize: window.minSize), display: true)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard dragStart != nil else { return }
+            mouseDragged(with: event)
+            dragStart = nil
+            NSCursor.pop()
+            window?.invalidateCursorRects(for: self)
+        }
     }
 }
 
