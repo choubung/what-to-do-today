@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.2.zip"><strong>v1.3.2 소스 ZIP 다운로드</strong></a>
+  <a href="https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.3.zip"><strong>v1.3.3 소스 ZIP 다운로드</strong></a>
   · <a href="docs/build.md">설치 안내</a>
   · <a href="https://github.com/choubung/what-to-do-today/releases/latest">최신 릴리즈</a><br>
   <sub>macOS 27.0.1 이상 · Xcode로 빌드하는 소스 배포</sub>
@@ -21,7 +21,7 @@
 오늘 할 일과 한 일, 예정된 할 일을 한곳에서 관리합니다. 지난 완료 기록은 캘린더에서 찾아볼 수 있어요.
 
 <p align="center">
-  <img src="docs/images/app-preview.png" width="480" alt="오늘 할 일, 완료한 항목, 예정된 할 일을 보여주는 앱 화면">
+  <img src="docs/images/app-v1.3.3-preview.png" width="480" alt="오늘 할 일, 완료한 항목, 예정된 할 일을 보여주는 앱 화면">
 </p>
 
 ## 바탕화면 위젯으로 빠르게 체크하기
