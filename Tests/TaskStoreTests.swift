@@ -109,10 +109,104 @@ private enum TaskStoreTests {
         try expect(try store.fetchCategories().map(\.id) == [personal.id, defaultID, added.id], "Deletion preserves relative ordering")
     }
 
+    private static func testBackupTransfer(in directory: URL) throws {
+        let widgetURL = directory.appendingPathComponent("with-widget/Tasks.sqlite")
+        let dmgURL = directory.appendingPathComponent("dmg/Tasks.sqlite")
+        try FileManager.default.createDirectory(at: widgetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let originalID = UUID()
+        try executeLegacySQL("""
+            CREATE TABLE todos (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL,
+                created_at REAL NOT NULL, completed_at REAL);
+            INSERT INTO todos VALUES ('\(originalID)', '기존 완료 기록', 100, 200);
+            """, at: widgetURL)
+        let widget = try TodoStore(databaseURL: widgetURL)
+        let dmg = try TodoStore(databaseURL: dmgURL)
+        let independent = try dmg.addTask(title: "DMG에만 있던 할 일")
+        let dmgBefore = try dmg.fetchSnapshot()
+        let category = try widget.createCategory(name: "업무")
+        try widget.saveCategoryStickyColor(id: category.id, colorHex: "#E0F3E7")
+        let upcoming = try widget.addTask(title: "다음 주 회의", categoryID: category.id, showAsStickyNote: true, plannedDay: 20991231)
+        try widget.saveStickyFontSize(id: upcoming.id, fontSize: 22)
+        guard let reminder = ReminderLocalTime(year: 2099, month: 12, day: 31, hour: 10, minute: 30) else {
+            throw TestFailure(description: "The backup test reminder must be valid")
+        }
+        _ = try widget.setReminder(id: upcoming.id, localTime: reminder)
+        let widgetBefore = try widget.fetchSnapshot()
+        try expect(widgetBefore.tasks.contains { $0.id == originalID && $0.completedAt == Date(timeIntervalSince1970: 200) },
+                   "The existing widget database keeps its historical task on upgrade")
+
+        let firstBackup = try widget.exportBackup(to: directory)
+        let priorDmgBackup = try dmg.restoreBackup(from: firstBackup)
+        try expect(try dmg.fetchSnapshot() == widgetBefore, "DMG import keeps IDs, history, categories, planned dates, sticky notes and reminders")
+        try expect(try widget.fetchSnapshot() == widgetBefore, "Export and import leave the widget database unchanged")
+        let otherDMGConnection = try TodoStore(databaseURL: dmgURL)
+        try expect(try otherDMGConnection.fetchSnapshot() == widgetBefore, "A new connection reads the imported data")
+
+        try dmg.setCompleted(id: upcoming.id, completed: true)
+        let dmgAfterEdit = try dmg.fetchSnapshot()
+        let secondBackup = try dmg.exportBackup(to: directory)
+        let priorWidgetBackup = try widget.restoreBackup(from: secondBackup)
+        try expect(try widget.fetchSnapshot() == dmgAfterEdit, "Edited DMG data transfers back to the widget store")
+
+        _ = try dmg.restoreBackup(from: priorDmgBackup)
+        try expect(try dmg.fetchSnapshot() == dmgBefore, "The DMG's previous content is recoverable")
+        try expect(try dmg.fetchTasks().first?.id == independent.id, "Recovery keeps the previous task ID")
+        _ = try widget.restoreBackup(from: priorWidgetBackup)
+        try expect(try widget.fetchSnapshot() == widgetBefore, "The widget's previous content is recoverable")
+
+        let broken = directory.appendingPathComponent("broken.wtdtbackup")
+        try FileManager.default.copyItem(at: firstBackup, to: broken)
+        try executeLegacySQL("UPDATE category_settings SET default_category_id = 'missing'", at: broken)
+        do {
+            _ = try dmg.restoreBackup(from: broken)
+            throw TestFailure(description: "Invalid backup accepted")
+        } catch is TodoStoreError {}
+        try expect(try dmg.fetchSnapshot() == dmgBefore, "A failed import rolls back every table")
+
+        let foreign = directory.appendingPathComponent("foreign.wtdtbackup")
+        try Data("not a database".utf8).write(to: foreign)
+        do {
+            _ = try dmg.restoreBackup(from: foreign)
+            throw TestFailure(description: "Unrecognized backup accepted")
+        } catch TodoStoreError.invalidBackup {}
+        try expect(try dmg.fetchSnapshot() == dmgBefore, "A foreign backup leaves existing data intact")
+    }
+
+    private static func testBackupStickyNoteRestoration(in directory: URL) throws {
+        let source = try TodoStore(databaseURL: directory.appendingPathComponent("restoration-source.sqlite"))
+        let destination = try TodoStore(databaseURL: directory.appendingPathComponent("restoration-destination.sqlite"))
+        let completed = try source.addTask(title: "완료 취소로 복원", showAsStickyNote: true)
+        let hidden = try source.addTask(title: "모두 숨기기에서 복원", showAsStickyNote: true)
+        try source.setCompleted(id: completed.id, completed: true, fromStickyNote: true)
+        try source.hideAllStickyNotes()
+        let backup = try source.exportBackup(to: directory)
+        _ = try destination.restoreBackup(from: backup)
+        try expect(try destination.fetchSnapshot().canRestoreStickyNotes, "Import keeps the hidden group")
+        try destination.restoreHiddenStickyNotes()
+        try destination.setCompleted(id: completed.id, completed: false)
+        let visibleIDs = try destination.fetchSnapshot().stickyNotes.filter(\.isVisible).map(\.id)
+        try expect(Set(visibleIDs) == [completed.id, hidden.id], "Both restore actions still work after import")
+
+        let legacy = directory.appendingPathComponent("legacy-v1.wtdtbackup")
+        try FileManager.default.copyItem(at: backup, to: legacy)
+        try executeLegacySQL("""
+            DROP TRIGGER restore_sticky_note_on_completion_undo;
+            DROP TABLE sticky_note_restore;
+            ALTER TABLE sticky_notes DROP COLUMN reopen_on_completion_undo;
+            PRAGMA user_version = 1;
+            """, at: legacy)
+        _ = try destination.restoreBackup(from: legacy)
+        let legacySnapshot = try destination.fetchSnapshot()
+        try expect(legacySnapshot.tasks.map(\.id).contains(completed.id), "Version 1 backups still restore tasks")
+        try expect(!legacySnapshot.canRestoreStickyNotes, "Version 1 backups have no hidden group")
+    }
+
     static func main() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("what-to-do-today-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
+        try testBackupTransfer(in: directory)
+        try testBackupStickyNoteRestoration(in: directory)
 
         try testCategoryStickyColors(in: directory)
         try testCategoryOrder(in: directory)
@@ -212,7 +306,7 @@ private enum TaskStoreTests {
         try testCategories(in: directory)
         try testRequiredCategoryMigration(in: directory)
         try testReminders(in: directory)
-        print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, concurrency, and sticky-note migration/state tests.")
+        print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, concurrency, sticky-note migration/state, and backup transfer tests.")
     }
 
     private static func testStickyColorPersistence(in directory: URL) throws {
