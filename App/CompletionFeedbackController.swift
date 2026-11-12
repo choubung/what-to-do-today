@@ -37,7 +37,7 @@ final class CompletionFeedbackController {
             userInfo: [.announcement: "완료했어요", .priority: NSAccessibilityPriorityLevel.low.rawValue]
         )
         dismissal = Task { [weak self] in
-            do { try await Task.sleep(for: .milliseconds(1500)) } catch { return }
+            do { try await Task.sleep(for: .milliseconds(1200)) } catch { return }
             guard let self, !Task.isCancelled, presentationID == id else { return }
             self.panel?.orderOut(nil)
             dismissal = nil
