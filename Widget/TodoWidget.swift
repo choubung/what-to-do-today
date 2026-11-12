@@ -175,8 +175,6 @@ struct TodoWidgetView: View {
                     }
                 }
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: entry.tasks)
-                // Keep page navigation from animating task rows between unrelated pages.
-                .id(entry.page)
                 .transition(.identity)
                 Spacer(minLength: 0)
             }
