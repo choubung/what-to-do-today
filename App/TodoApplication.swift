@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
+#if !STANDALONE
 import WidgetKit
+#endif
 
 @main
 @MainActor
@@ -13,7 +16,7 @@ enum TodoApplication {
         let application = NSApplication.shared
         let delegate = TodoApplicationDelegate()
         application.delegate = delegate
-        application.setActivationPolicy(.regular)
+        application.setActivationPolicy(.accessory)
         withExtendedLifetime(delegate) { application.run() }
     }
 
@@ -25,7 +28,9 @@ enum TodoApplication {
                 DistributedNotificationCenter.default().postNotificationName(
                     TodoStore.notificationName, object: nil, userInfo: nil, deliverImmediately: true
                 )
+                #if !STANDALONE
                 WidgetCenter.shared.reloadAllTimelines()
+                #endif
             }
         )
         do {
@@ -38,10 +43,12 @@ enum TodoApplication {
 }
 
 @MainActor
-final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
+final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, @preconcurrency NSStatusItemExpandedInterfaceDelegate {
     private let model = TodoListModel()
     private var mainWindow: NSWindow?
     private var quickAddWindow: NSPanel?
+    private var statusItem: NSStatusItem?
+    private var statusPanel: TodoStatusPanel?
     private var openedFromURL = false
     private lazy var stickyNotes = StickyNoteCoordinator(model: model)
     private lazy var reminders = ReminderCoordinator(
@@ -51,16 +58,20 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         }
     )
     private var isPreparingToTerminate = false
+    private var isTransferringData = false
     private var dayBoundaryTimer: Timer?
     private var trackedDayRange: DateInterval?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenu()
+        configureStatusItem()
         _ = stickyNotes
         reminders.onOpenList = { [weak self] in self?.showMainWindow() }
         reminders.start()
         configureDateTracking()
+        #if !STANDALONE
         WidgetCenter.shared.reloadTimelines(ofKind: "WhatToDoTodayWidget")
+        #endif
         // Normal open/reopen events show the list; a login launch only restores background services.
     }
 
@@ -75,7 +86,12 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme == "whattodotoday" {
+        #if STANDALONE
+        let scheme = "whattodotoday-dmg"
+        #else
+        let scheme = "whattodotoday"
+        #endif
+        for url in urls where url.scheme == scheme {
             switch url.host {
             case "add":
                 openedFromURL = true
@@ -90,9 +106,15 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        #if STANDALONE
+        _ = scheduleDayBoundary()
+        #else
         let dayChanged = scheduleDayBoundary()
+        #endif
         Task { await model.refresh() }
+        #if !STANDALONE
         if dayChanged { WidgetCenter.shared.reloadTimelines(ofKind: "WhatToDoTodayWidget") }
+        #endif
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -102,6 +124,22 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func windowWillClose(_ notification: Notification) {
+        // AppKit sends this before updating the window's visibility.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !isPreparingToTerminate else { return }
+            let hasEditor = [mainWindow, quickAddWindow].contains {
+                $0?.isVisible == true || $0?.isMiniaturized == true
+            }
+            if !hasEditor { NSApp.setActivationPolicy(.accessory) }
+        }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard let panel = notification.object as? NSWindow, panel === statusPanel else { return }
+        statusItem?.expandedInterfaceSession?.cancel()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         reminders.stop()
         dayBoundaryTimer?.invalidate()
@@ -110,6 +148,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !isTransferringData else { return .terminateCancel }
         guard !isPreparingToTerminate else { return .terminateLater }
         isPreparingToTerminate = true
         Task {
@@ -123,6 +162,10 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func hideAllStickyNotes() {
         Task { _ = await model.hideAllStickyNotes() }
+    }
+
+    private func restoreHiddenStickyNotes() {
+        Task { _ = await model.restoreHiddenStickyNotes() }
     }
 
     @objc private func closeKeyWindow(_ sender: Any?) {
@@ -149,7 +192,9 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         guard !isPreparingToTerminate else { return }
         _ = scheduleDayBoundary()
         Task { await model.refresh() }
+        #if !STANDALONE
         WidgetCenter.shared.reloadTimelines(ofKind: "WhatToDoTodayWidget")
+        #endif
     }
 
     /// Uses the actual local day's end, including days shortened or lengthened by clock changes.
@@ -171,6 +216,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showMainWindow() {
+        NSApp.setActivationPolicy(.regular)
         if mainWindow == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 460, height: 580),
@@ -182,6 +228,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
             window.contentView = NSHostingView(rootView: TodoListView(model: model, reminders: reminders))
             window.minSize = NSSize(width: 360, height: 380)
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.setFrameAutosaveName("TodoMainWindow")
             window.center()
             mainWindow = window
@@ -192,6 +239,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showQuickAdd() {
+        NSApp.setActivationPolicy(.regular)
         if let quickAddWindow, quickAddWindow.isVisible {
             quickAddWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -207,6 +255,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         panel.title = "새 할 일"
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
+        panel.delegate = self
         panel.contentView = NSHostingView(rootView: QuickAddView(model: model) { [weak panel] in
             panel?.close()
         })
@@ -214,6 +263,149 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         quickAddWindow = panel
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func configureStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "What to Do Today")
+        item.button?.toolTip = "What to Do Today"
+        item.expandedInterfaceDelegate = self
+        statusItem = item
+    }
+
+    func statusItem(_ statusItem: NSStatusItem, didBegin session: NSStatusItemExpandedInterfaceSession) {
+        guard let button = statusItem.button, let buttonWindow = button.window, let screen = buttonWindow.screen else {
+            session.cancel()
+            return
+        }
+        let panel = TodoStatusPanel(
+            contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false
+        )
+        panel.isReleasedWhenClosed = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isExcludedFromWindowsMenu = true
+        panel.level = .popUpMenu
+        // The menu belongs on the Space where its icon was clicked, even when
+        // a different application owns that full-screen Space.
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications, .ignoresCycle]
+        panel.delegate = self
+        panel.onCancel = { [weak session] in session?.cancel() }
+
+        let content = NSHostingView(rootView: VStack(alignment: .leading, spacing: 3) {
+            statusAction("할 일 목록 열기", icon: "checklist", action: showMainWindow)
+            statusAction("새 할 일", icon: "plus", action: showQuickAdd)
+            statusAction("포스트잇 모두 숨기기", icon: "eye.slash", action: hideAllStickyNotes)
+                .disabled(model.visibleStickyCount == 0 || model.isSaving)
+            statusAction("포스트잇 그대로 띄우기", icon: "eye", action: restoreHiddenStickyNotes)
+                .disabled(!model.canRestoreStickyNotes || model.isSaving)
+            Divider().padding(.vertical, 3)
+            statusAction("What to Do Today 종료", icon: "power") { NSApp.terminate(nil) }
+        }
+        .padding(8)
+        .frame(width: 225)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 13))
+        .allowsWindowActivationEvents())
+        panel.contentView = content
+        let size = content.fittingSize
+        let anchor = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let x = min(max(anchor.minX, screen.frame.minX + 4), screen.frame.maxX - size.width - 4)
+        panel.setFrame(NSRect(x: x, y: anchor.minY - size.height - 4, width: size.width, height: size.height), display: false)
+        statusPanel = panel
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func statusItemDidEndExpandedInterfaceSession(_ statusItem: NSStatusItem, animated: Bool) {
+        let panel = statusPanel
+        statusPanel = nil
+        panel?.delegate = nil
+        panel?.close()
+    }
+
+    private func statusAction(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button {
+            self.statusItem?.expandedInterfaceSession?.cancel()
+            action()
+        } label: {
+            Label(title, systemImage: icon)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.primary)
+    }
+
+    @objc private func exportData() {
+        guard !isTransferringData else { return }
+        let panel = NSOpenPanel()
+        panel.message = "할 일 백업을 저장할 폴더를 선택하세요."
+        panel.prompt = "백업 저장"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+
+        transferData(using: folder) {
+            let backup = try await self.model.exportBackup(to: folder)
+            self.showBackupResult(title: "백업을 저장했어요.", file: backup)
+        }
+    }
+
+    @objc private func importData() {
+        guard !isTransferringData else { return }
+        let panel = NSOpenPanel()
+        panel.message = "이 앱에서 내보낸 할 일 백업 파일을 선택하세요."
+        panel.prompt = "백업 선택"
+        if let backupType = UTType(filenameExtension: "wtdtbackup") {
+            panel.allowedContentTypes = [backupType]
+        }
+        guard panel.runModal() == .OK, let file = panel.url else { return }
+
+        let confirmation = NSAlert()
+        confirmation.messageText = "백업의 할 일로 바꿀까요?"
+        confirmation.informativeText = "이 앱의 할 일과 설정이 선택한 백업의 내용으로 바뀝니다. 현재 내용은 먼저 별도의 백업으로 저장됩니다."
+        confirmation.addButton(withTitle: "취소")
+        confirmation.addButton(withTitle: "백업 가져오기").hasDestructiveAction = true
+        guard confirmation.runModal() == .alertSecondButtonReturn else { return }
+
+        transferData(using: file) {
+            let previous = try await self.model.restoreBackup(from: file)
+            self.showBackupResult(title: "백업을 가져왔어요.", file: previous)
+        }
+    }
+
+    private func transferData(using url: URL, operation: @escaping @MainActor () async throws -> Void) {
+        isTransferringData = true
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        Task {
+            defer {
+                if hasAccess { url.stopAccessingSecurityScopedResource() }
+                isTransferringData = false
+            }
+            do {
+                await stickyNotes.flushPositions()
+                try await operation()
+            } catch {
+                let alert = NSAlert(error: error)
+                alert.runModal()
+            }
+        }
+    }
+
+    private func showBackupResult(title: String, file: URL) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = "저장된 백업: \(file.lastPathComponent)"
+        alert.addButton(withTitle: "확인")
+        alert.addButton(withTitle: "Finder에서 보기")
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSWorkspace.shared.activateFileViewerSelecting([file])
+        }
     }
 
     private func configureMenu() {
@@ -238,6 +430,11 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         let hideNotesItem = NSMenuItem(title: "포스트잇 모두 숨기기", action: #selector(hideAllStickyNotes), keyEquivalent: "")
         hideNotesItem.target = self
         fileMenu.addItem(hideNotesItem)
+        fileMenu.addItem(.separator())
+        let exportItem = fileMenu.addItem(withTitle: "할 일 백업 내보내기…", action: #selector(exportData), keyEquivalent: "")
+        exportItem.target = self
+        let importItem = fileMenu.addItem(withTitle: "할 일 백업 가져오기…", action: #selector(importData), keyEquivalent: "")
+        importItem.target = self
         fileMenu.addItem(.separator())
         let closeItem = fileMenu.addItem(withTitle: "창 닫기", action: #selector(closeKeyWindow(_:)), keyEquivalent: "w")
         closeItem.target = self
@@ -267,5 +464,15 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(windowItem)
         NSApp.mainMenu = menu
         NSApp.windowsMenu = windowMenu
+    }
+}
+
+private final class TodoStatusPanel: NSPanel {
+    var onCancel: (() -> Void)?
+
+    override var canBecomeKey: Bool { true }
+
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
     }
 }

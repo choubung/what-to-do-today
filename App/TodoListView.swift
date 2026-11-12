@@ -32,7 +32,7 @@ struct TodoListView: View {
                     Image(systemName: "note")
                 }
                 .buttonStyle(.plain)
-                .help("포스트잇 띄우기").accessibilityLabel("포스트잇 띄우기")
+                .help("포스트잇 표시 관리").accessibilityLabel("포스트잇 표시 관리")
                 .disabled(model.isLoading || model.isSaving || model.incompleteTasks.isEmpty)
                 Button { showingSettings = true } label: {
                     Image(systemName: "gearshape")
@@ -350,58 +350,59 @@ private struct TodoTaskRow: View {
 struct StickyNotePickerView: View {
     @ObservedObject var model: TodoListModel
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedIDs: Set<UUID> = []
+    @State private var pendingVisibility: [UUID: Bool] = [:]
 
-    private var availableIDs: [UUID] {
-        model.incompleteTasks.filter { !model.isStickyVisible(for: $0.id) }.map(\.id)
+    private var tasks: [TodoItem] { model.incompleteTasks }
+    private var visibleCount: Int { tasks.filter { willShow($0.id) }.count }
+    private var hasChanges: Bool {
+        tasks.contains { willShow($0.id) != model.isStickyVisible(for: $0.id) }
     }
-    private var selectedCount: Int { selectedIDs.intersection(availableIDs).count }
+
+    private func willShow(_ id: UUID) -> Bool {
+        pendingVisibility[id] ?? model.isStickyVisible(for: id)
+    }
+
+    private func setAllVisible(_ visible: Bool) {
+        let changed = tasks.filter { model.isStickyVisible(for: $0.id) != visible }
+        pendingVisibility = Dictionary(uniqueKeysWithValues: changed.map { ($0.id, visible) })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("포스트잇 띄우기").font(.headline)
-            Text("바탕화면에 띄울 할 일을 선택하세요.")
+            Text("포스트잇 표시 관리").font(.headline)
+            Text("체크한 할 일은 띄우고, 체크를 푼 할 일은 숨깁니다.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             HStack {
-                Button("전체 선택") { selectedIDs = Set(availableIDs) }
-                    .disabled(availableIDs.isEmpty || selectedCount == availableIDs.count || model.isSaving)
-                Button("선택 해제") { selectedIDs.removeAll() }
-                    .disabled(selectedCount == 0 || model.isSaving)
+                Button("모두 표시") { setAllVisible(true) }
+                    .disabled(visibleCount == tasks.count || model.isSaving)
+                Button("모두 숨기기") { setAllVisible(false) }
+                    .disabled(visibleCount == 0 || model.isSaving)
                 Spacer()
-                Text("\(selectedCount)개 선택")
+                Text("\(visibleCount)개 표시")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             .controlSize(.small)
 
-            if model.incompleteTasks.isEmpty {
+            if tasks.isEmpty {
                 Text("띄울 수 있는 미완료 할 일이 없어요.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 100)
             } else {
-                List(model.incompleteTasks) { task in
+                List(tasks) { task in
                     Toggle(isOn: Binding(
-                        get: { selectedIDs.contains(task.id) && !model.isStickyVisible(for: task.id) },
-                        set: { isSelected in
-                            guard !model.isStickyVisible(for: task.id) else { return }
-                            if isSelected { selectedIDs.insert(task.id) }
-                            else { selectedIDs.remove(task.id) }
+                        get: { willShow(task.id) },
+                        set: { visible in
+                            pendingVisibility[task.id] = visible == model.isStickyVisible(for: task.id) ? nil : visible
                         }
                     )) {
-                        HStack {
-                            Text(task.title)
-                                .lineLimit(2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            if model.isStickyVisible(for: task.id) {
-                                Text("표시 중")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                        Text(task.title)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .toggleStyle(.checkbox)
-                    .disabled(model.isSaving || model.isStickyVisible(for: task.id))
+                    .disabled(model.isSaving)
                     .padding(.vertical, 4)
                     .listRowSeparator(.hidden)
                 }
@@ -420,23 +421,21 @@ struct StickyNotePickerView: View {
                 }
                 .keyboardShortcut(.cancelAction)
                 .disabled(model.isSaving)
-                Button("띄우기") {
-                    let ids = availableIDs.filter { selectedIDs.contains($0) }
+                Button("적용") {
+                    let showing = tasks.map(\.id).filter { willShow($0) && !model.isStickyVisible(for: $0) }
+                    let hiding = tasks.map(\.id).filter { !willShow($0) && model.isStickyVisible(for: $0) }
                     Task {
-                        if await model.showStickyNotes(ids) { dismiss() }
+                        if await model.setStickyNoteVisibility(showing: showing, hiding: hiding) { dismiss() }
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(selectedCount == 0 || model.isSaving)
+                .disabled(!hasChanges || model.isSaving)
             }
         }
         .padding(24)
         .frame(width: 440)
         .interactiveDismissDisabled(model.isSaving)
         .onAppear { model.errorMessage = nil }
-        .onChange(of: availableIDs) { _, ids in
-            selectedIDs.formIntersection(ids)
-        }
     }
 }
 

@@ -1,6 +1,8 @@
 import AppKit
 import Combine
+#if !STANDALONE
 import WidgetKit
+#endif
 
 private actor TodoRepository {
     private var store: TodoStore?
@@ -12,6 +14,14 @@ private actor TodoRepository {
         let opened = try TodoStore.live()
         store = opened
         return opened
+    }
+
+    func exportBackup(to folder: URL) throws -> URL {
+        try connection().exportBackup(to: folder)
+    }
+
+    func restoreBackup(from file: URL) throws -> URL {
+        try connection().restoreBackup(from: file)
     }
 
     func fetchSnapshot() throws -> TodoSnapshot {
@@ -70,24 +80,24 @@ private actor TodoRepository {
         try connection().markRemindersDelivered(generations: generations, at: date)
     }
 
-    func setCompleted(id: UUID, completed: Bool) throws {
-        try connection().setCompleted(id: id, completed: completed)
+    func setCompleted(id: UUID, completed: Bool, fromStickyNote: Bool = false) throws {
+        try connection().setCompleted(id: id, completed: completed, fromStickyNote: fromStickyNote)
     }
 
     func delete(id: UUID) throws {
         try connection().deleteTask(id: id)
     }
 
-    func showStickyNotes(ids: [UUID]) throws {
-        try connection().showStickyNotes(ids: ids)
-    }
-
-    func hideStickyNotes(ids: [UUID]) throws {
-        try connection().hideStickyNotes(ids: ids)
+    func setStickyNoteVisibility(showing: [UUID], hiding: [UUID]) throws {
+        try connection().setStickyNoteVisibility(showing: showing, hiding: hiding)
     }
 
     func hideAllStickyNotes() throws {
         try connection().hideAllStickyNotes()
+    }
+
+    func restoreHiddenStickyNotes() throws {
+        try connection().restoreHiddenStickyNotes()
     }
 
     func setStickyAlwaysOnTop(id: UUID, value: Bool) throws {
@@ -156,6 +166,7 @@ final class TodoListModel: ObservableObject {
     var incompleteTasks: [TodoItem] { tasks.filter { !$0.isCompleted } }
     var completedTasks: [TodoItem] { tasks.filter(\.isCompleted) }
     var visibleStickyCount: Int { stickyNotes.filter(\.isVisible).count }
+    var canRestoreStickyNotes: Bool { snapshot.canRestoreStickyNotes }
     var defaultStickyFontSize: Double { snapshot.stickyNoteDefaultFontSize }
 
     func categoryName(for task: TodoItem) -> String? {
@@ -293,7 +304,7 @@ final class TodoListModel: ObservableObject {
     }
 
     @discardableResult
-    func setCompleted(_ task: TodoItem, completed: Bool) async -> Bool {
+    func setCompleted(_ task: TodoItem, completed: Bool, fromStickyNote: Bool = false) async -> Bool {
         guard !isSaving, !isCompleting(task.id) else { return false }
         pendingCompletions[task.id] = completed
         if errorMessage != nil { errorMessage = nil }
@@ -302,7 +313,7 @@ final class TodoListModel: ObservableObject {
             resumeSaveWaitersIfIdle()
         }
         do {
-            try await repository.setCompleted(id: task.id, completed: completed)
+            try await repository.setCompleted(id: task.id, completed: completed, fromStickyNote: fromStickyNote)
             notifyChange(reloadWidgets: true)
             await refresh()
             return true
@@ -318,23 +329,31 @@ final class TodoListModel: ObservableObject {
     }
 
     func showStickyNotes(_ ids: [UUID]) async -> Bool {
-        guard !ids.isEmpty else { return true }
-        let succeeded = await save(reloadWidgets: false) {
-            try await self.repository.showStickyNotes(ids: ids)
-        }
-        if succeeded { onShowStickyNotes?(ids) }
-        return succeeded
+        await setStickyNoteVisibility(showing: ids, hiding: [])
     }
 
     func hideStickyNotes(_ ids: [UUID]) async -> Bool {
-        await save(reloadWidgets: false) {
-            try await self.repository.hideStickyNotes(ids: ids)
+        await setStickyNoteVisibility(showing: [], hiding: ids)
+    }
+
+    func setStickyNoteVisibility(showing: [UUID], hiding: [UUID]) async -> Bool {
+        guard !showing.isEmpty || !hiding.isEmpty else { return true }
+        let succeeded = await save(reloadWidgets: false) {
+            try await self.repository.setStickyNoteVisibility(showing: showing, hiding: hiding)
         }
+        if succeeded && !showing.isEmpty { onShowStickyNotes?(showing) }
+        return succeeded
     }
 
     func hideAllStickyNotes() async -> Bool {
         await save(reloadWidgets: false) {
             try await self.repository.hideAllStickyNotes()
+        }
+    }
+
+    func restoreHiddenStickyNotes() async -> Bool {
+        await save(reloadWidgets: false) {
+            try await self.repository.restoreHiddenStickyNotes()
         }
     }
 
@@ -351,6 +370,25 @@ final class TodoListModel: ObservableObject {
         } catch {
             errorMessage = Self.positionErrorMessage
         }
+    }
+
+    func exportBackup(to folder: URL) async throws -> URL {
+        await waitForPendingSave()
+        return try await repository.exportBackup(to: folder)
+    }
+
+    func restoreBackup(from file: URL) async throws -> URL {
+        await waitForPendingSave()
+        isSaving = true
+        defer {
+            isSaving = false
+            resumeSaveWaitersIfIdle()
+        }
+        let previousBackup = try await repository.restoreBackup(from: file)
+        errorMessage = nil
+        notifyChange(reloadWidgets: true)
+        await refresh()
+        return previousBackup
     }
 
     func waitForPendingSave() async {
@@ -442,7 +480,9 @@ final class TodoListModel: ObservableObject {
             userInfo: nil,
             deliverImmediately: true
         )
+        #if !STANDALONE
         if reloadWidgets { WidgetCenter.shared.reloadAllTimelines() }
+        #endif
     }
 
     private func resumeSaveWaitersIfIdle() {
