@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.0.zip"><strong>v1.3.0 소스 ZIP 다운로드</strong></a>
+  <a href="https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.1.zip"><strong>v1.3.1 소스 ZIP 다운로드</strong></a>
   · <a href="docs/build.md">설치 안내</a>
   · <a href="https://github.com/choubung/what-to-do-today/releases/latest">최신 릴리즈</a><br>
   <sub>macOS 27.0.1 이상 · Xcode로 빌드하는 소스 배포</sub>
