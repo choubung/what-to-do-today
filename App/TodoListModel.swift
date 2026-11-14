@@ -56,6 +56,10 @@ private actor TodoRepository {
         try connection().reorderCategories(ids: ids)
     }
 
+    func reorderTasks(ids: [UUID], categoryID: UUID) throws {
+        try connection().reorderTasks(ids: ids, categoryID: categoryID)
+    }
+
     func renameCategory(id: UUID, name: String) throws {
         try connection().renameCategory(id: id, name: name)
     }
@@ -266,6 +270,10 @@ final class TodoListModel: ObservableObject {
 
     func reorderCategories(ids: [UUID]) async -> Bool {
         await save { try await self.repository.reorderCategories(ids: ids) }
+    }
+
+    func reorderTasks(ids: [UUID], categoryID: UUID) async -> Bool {
+        await save { try await self.repository.reorderTasks(ids: ids, categoryID: categoryID) }
     }
 
     func renameCategory(id: UUID, name: String) async -> Bool {

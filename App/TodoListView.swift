@@ -3,7 +3,7 @@ import SwiftUI
 struct TodoListView: View {
     @ObservedObject var model: TodoListModel
     @ObservedObject var reminders: ReminderCoordinator
-    @State private var listPosition = ScrollPosition(edge: .top)
+    @State private var pendingTaskOrders: [UUID: [UUID]] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editingTask: TodoItem?
     @State private var deletingTask: TodoItem?
@@ -66,25 +66,27 @@ struct TodoListView: View {
             if model.isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 32) {
+                List {
+                    Group {
                         statusSection(completed: false)
                         statusSection(completed: true)
                         if !model.upcomingTasks.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
+                            Group {
                                 Text("예정된 할 일")
                                     .font(.title2.weight(.bold))
                                     .accessibilityAddTraits(.isHeader)
+                                    .padding(.top, 20)
                                 taskRows(model.upcomingTasks, upcoming: true)
                             }
                         }
                     }
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.completedTasks.map(\.id))
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 }
-                .scrollPosition($listPosition)
-                .defaultScrollAnchor(.top, for: .sizeChanges)
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .environment(\.defaultMinListRowHeight, 0)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.completedTasks.map(\.id))
             }
         }
         .frame(minWidth: 360, minHeight: 360)
@@ -146,10 +148,12 @@ struct TodoListView: View {
         let tasks = model.tasks.filter { $0.isCompleted == completed }
         let grouped = Dictionary(grouping: tasks, by: \.categoryID)
         let categories = model.categories.filter { !completed || !(grouped[$0.id] ?? []).isEmpty }
-        return VStack(alignment: .leading, spacing: 18) {
+        return Group {
             Text(completed ? "한 일" : "할 일")
                 .font(.title2.weight(.bold))
                 .accessibilityAddTraits(.isHeader)
+                .padding(.top, completed ? 20 : 0)
+                .padding(.bottom, 6)
             ForEach(categories) { category in
                 categorySection(category, tasks: grouped[category.id] ?? [], completed: completed)
             }
@@ -158,54 +162,74 @@ struct TodoListView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
-        .id(completed ? "completed-tasks" : "incomplete-tasks")
     }
 
     private func categorySection(_ category: TodoCategory, tasks: [TodoItem], completed: Bool) -> some View {
         let key = "\(completed ? "completed" : "pending"):\(category.id)"
         let isCollapsed = collapsedCategories.contains(key)
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Button {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-                        if isCollapsed { collapsedCategories.remove(key) }
-                        else { collapsedCategories.insert(key) }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                            .frame(width: 16, height: 24)
-                        Text(category.name).font(.headline)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if isCollapsed {
-                            Text("\(tasks.count)").font(.caption).foregroundStyle(.secondary)
+        return Group {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Button {
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
+                            if isCollapsed { collapsedCategories.remove(key) }
+                            else { collapsedCategories.insert(key) }
                         }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                                .frame(width: 16, height: 24)
+                            Text(category.name).font(.headline)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if isCollapsed {
+                                Text("\(tasks.count)").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .contentShape(Rectangle())
                     }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(completed ? "한 일" : "할 일") · \(category.name) \(isCollapsed ? "펼치기" : "접기")")
-                .accessibilityValue(isCollapsed ? "접힘" : "펼침")
-                Spacer(minLength: 8)
-                if !completed {
-                    Button { addingCategory = category } label: {
-                        Image(systemName: "plus").frame(width: 24, height: 24)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(completed ? "한 일" : "할 일") · \(category.name) \(isCollapsed ? "펼치기" : "접기")")
+                    .accessibilityValue(isCollapsed ? "접힘" : "펼침")
+                    Spacer(minLength: 8)
+                    if !completed {
+                        Button { addingCategory = category } label: {
+                            Image(systemName: "plus").frame(width: 24, height: 24)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("\(category.name)에 할 일 추가")
+                        .help("\(category.name)에 할 일 추가")
+                        .disabled(model.isSaving || model.isLoading)
                     }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("\(category.name)에 할 일 추가")
-                    .help("\(category.name)에 할 일 추가")
-                    .disabled(model.isSaving || model.isLoading)
                 }
+                Divider().padding(.bottom, 4)
             }
-            Divider().padding(.bottom, 4)
+            .padding(.top, 6)
+            .accessibilityElement(children: .contain)
             if !isCollapsed {
                 if tasks.isEmpty {
                     Text("할 일이 없어요")
                         .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
-                } else {
+                } else if completed {
                     taskRows(tasks)
+                } else {
+                    let orderedTasks = displayedTasks(tasks, categoryID: category.id)
+                    ForEach(orderedTasks) { task in
+                        taskRow(task, reorderable: true)
+                            .moveDisabled(model.isSaving || !pendingTaskOrders.isEmpty || tasks.contains { model.isCompleting($0.id) })
+                    }
+                    .onMove { offsets, destination in
+                        guard !model.isSaving, pendingTaskOrders.isEmpty else { return }
+                        var ids = orderedTasks.map(\.id)
+                        ids.move(fromOffsets: offsets, toOffset: destination)
+                        // Keep the drop position visible while the shared store saves.
+                        pendingTaskOrders[category.id] = ids
+                        Task {
+                            _ = await model.reorderTasks(ids: ids, categoryID: category.id)
+                            pendingTaskOrders.removeValue(forKey: category.id)
+                        }
+                    }
                 }
             }
         }
@@ -213,17 +237,30 @@ struct TodoListView: View {
 
     private func taskRows(_ tasks: [TodoItem], upcoming: Bool = false) -> some View {
         ForEach(tasks) { task in
-            TodoTaskRow(
-                model: model,
-                taskID: task.id,
-                upcoming: upcoming,
-                edit: { editingTask = $0 },
-                delete: { deletingTask = $0 },
-                editReminder: { reminderTask = $0 },
-                didMoveCategory: showCategoryMoveNotice
-            )
-            .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            taskRow(task, upcoming: upcoming)
         }
+    }
+
+    private func displayedTasks(_ tasks: [TodoItem], categoryID: UUID) -> [TodoItem] {
+        guard let ids = pendingTaskOrders[categoryID] else { return tasks }
+        let byID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
+        let known = Set(ids)
+        return ids.compactMap { byID[$0] } + tasks.filter { !known.contains($0.id) }
+    }
+
+    private func taskRow(_ task: TodoItem, upcoming: Bool = false, reorderable: Bool = false) -> some View {
+        TodoTaskRow(
+            model: model,
+            taskID: task.id,
+            upcoming: upcoming,
+            reorderable: reorderable,
+            edit: { editingTask = $0 },
+            delete: { deletingTask = $0 },
+            editReminder: { reminderTask = $0 },
+            didMoveCategory: showCategoryMoveNotice
+        )
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
     }
 
     private func showCategoryMoveNotice(_ category: TodoCategory) {
@@ -239,6 +276,7 @@ private struct TodoTaskRow: View {
     @ObservedObject var model: TodoListModel
     let taskID: UUID
     let upcoming: Bool
+    let reorderable: Bool
     let edit: (TodoItem) -> Void
     let delete: (TodoItem) -> Void
     let editReminder: (TodoItem) -> Void
@@ -266,6 +304,7 @@ private struct TodoTaskRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
+                .help(reorderable ? "드래그하여 같은 카테고리 안에서 순서 변경" : "")
                 .foregroundStyle(isCompleted ? .secondary : .primary)
                 .strikethrough(isCompleted, color: .secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)

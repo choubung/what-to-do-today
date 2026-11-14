@@ -10,6 +10,7 @@ enum TodoStoreError: LocalizedError {
     case duplicateCategoryName
     case missingCategory
     case invalidCategoryOrder
+    case invalidTaskOrder
     case lastCategory
     case invalidCategoryDestination
     case unavailableAppGroup
@@ -36,6 +37,8 @@ enum TodoStoreError: LocalizedError {
             return "이 카테고리를 찾을 수 없어요. 다시 선택해 주세요."
         case .invalidCategoryOrder:
             return "카테고리 목록이 변경됐어요. 다시 순서를 정해 주세요."
+        case .invalidTaskOrder:
+            return "할 일 목록이 변경됐어요. 다시 순서를 정해 주세요."
         case .lastCategory:
             return "카테고리는 최소 하나가 필요해요. 마지막 카테고리는 삭제할 수 없어요."
         case .invalidCategoryDestination:
@@ -96,7 +99,8 @@ final class TodoStore: @unchecked Sendable {
         \(categoryJoin)
         \(dayFilter)
         ORDER BY completed_at IS NOT NULL ASC,
-                 \(categorySort)COALESCE(completed_at, created_at) DESC, todos.id ASC
+                 \(categorySort)CASE WHEN completed_at IS NULL THEN todos.sort_order END ASC,
+                 COALESCE(completed_at, created_at) DESC, todos.id ASC
         """
     }
 
@@ -348,6 +352,43 @@ final class TodoStore: @unchecked Sendable {
                 throw TodoStoreError.invalidCategoryOrder
             }
             try writeCategoryOrder(ids)
+        }
+    }
+
+    /// Reorders the current incomplete rows of one category without changing their
+    /// creation dates, completion, reminders, or sticky-note state.
+    func reorderTasks(ids: [UUID], categoryID: UUID, on date: Date = Date()) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try withTransaction(readOnly: false) {
+            let current = try prepare("""
+                SELECT id FROM todos WHERE category_id = ?1 AND completed_at IS NULL
+                    AND (planned_day IS NULL OR planned_day <= ?2)
+                """)
+            defer { sqlite3_finalize(current) }
+            try bind(categoryID.uuidString, to: current, at: 1)
+            try check(sqlite3_bind_int64(current, 2, Int64(TodoPlannedDay.key(for: date))))
+            var currentIDs = Set<UUID>()
+            while true {
+                let result = sqlite3_step(current)
+                if result == SQLITE_DONE { break }
+                guard result == SQLITE_ROW,
+                      let id = UUID(uuidString: stringColumn(current, index: 0)) else {
+                    throw databaseError()
+                }
+                currentIDs.insert(id)
+            }
+            guard ids.count == Set(ids).count, Set(ids) == currentIDs else {
+                throw TodoStoreError.invalidTaskOrder
+            }
+            let update = try prepare("UPDATE todos SET sort_order = ? WHERE id = ?")
+            defer { sqlite3_finalize(update) }
+            for (position, id) in ids.enumerated() {
+                try check(sqlite3_bind_int64(update, 1, Int64(position)))
+                try bind(id.uuidString, to: update, at: 2)
+                try finishWrite(update, requiresExistingTask: true)
+                try check(sqlite3_reset(update))
+            }
         }
     }
 
@@ -872,6 +913,17 @@ final class TodoStore: @unchecked Sendable {
             if try !tableColumns("todos").contains("planned_day") {
                 try execute("ALTER TABLE todos ADD COLUMN planned_day INTEGER")
             }
+            if try !tableColumns("todos").contains("sort_order") {
+                // NULL retains recency order for existing and newly added tasks.
+                try execute("ALTER TABLE todos ADD COLUMN sort_order INTEGER")
+            }
+            try execute("""
+                CREATE TRIGGER IF NOT EXISTS reset_task_order_on_category_change
+                AFTER UPDATE OF category_id ON todos WHEN OLD.category_id IS NOT NEW.category_id
+                BEGIN
+                    UPDATE todos SET sort_order = NULL WHERE id = NEW.id;
+                END;
+                """)
             try execute("CREATE INDEX IF NOT EXISTS todos_category ON todos(category_id)")
             try execute("CREATE INDEX IF NOT EXISTS todos_completion_date ON todos(completed_at DESC, id ASC)")
             if try !tableColumns("categories").contains("sticky_color_hex") {
@@ -1333,7 +1385,7 @@ final class TodoStore: @unchecked Sendable {
 
 extension TodoStore {
     private static let backupID = 0x57544454 // WTDT
-    private static let backupVersion = 2
+    private static let backupVersion = 3
 
     // Copy data into our own schema so a backup can't install tables, triggers or views.
     // Keep this list and the backup format version in sync with future schema changes.
@@ -1346,10 +1398,15 @@ extension TodoStore {
         ("todo_reminders", "todo_id, generation_id, year, month, day, hour, minute, delivered_at")
     ]
 
-    private static let backupTables = legacyBackupTables.map { table in
+    private static let version2BackupTables = legacyBackupTables.map { table in
         guard table.name == "sticky_notes" else { return table }
         return (name: table.name, columns: table.columns + ", reopen_on_completion_undo")
     } + [(name: "sticky_note_restore", columns: "todo_id")]
+
+    private static let backupTables = version2BackupTables.map { table in
+        guard table.name == "todos" else { return table }
+        return (name: table.name, columns: table.columns + ", sort_order")
+    }
 
     func exportBackup(to folder: URL) throws -> URL {
         try Self.withBackupWorkspace { workspace in
@@ -1426,6 +1483,7 @@ extension TodoStore {
             let tables: [(name: String, columns: String)]
             switch try value("PRAGMA transfer.user_version") {
             case "1": tables = Self.legacyBackupTables
+            case "2": tables = Self.version2BackupTables
             case String(Self.backupVersion): tables = Self.backupTables
             default: throw TodoStoreError.invalidBackup
             }
