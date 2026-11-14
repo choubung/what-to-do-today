@@ -211,6 +211,7 @@ private enum TaskStoreTests {
         try testCategoryStickyColors(in: directory)
         try testCategoryOrder(in: directory)
         try testWidgetCategoryOrder(in: directory)
+        try testTaskOrder(in: directory)
 
         let startupFailures = ConcurrentFailures()
         // Opening an existing WAL database misses the initial journal-mode transition race.
@@ -895,6 +896,78 @@ private enum TaskStoreTests {
             try expect(try store.fetchTasks().count == fixtures.count, "Today filtering must retain every stored task")
             try expect(try store.fetchSnapshot().tasks.count == fixtures.count, "Unfiltered snapshot callers must retain their previous behavior")
         }
+    }
+
+    private static func testTaskOrder(in directory: URL) throws {
+        let url = directory.appendingPathComponent("task-order.sqlite")
+        let app = try TodoStore(databaseURL: url)
+        let category = try app.fetchCategories()[0].id
+        let otherCategory = try app.createCategory(name: "다른 분류")
+        let first = try app.addTask(title: "첫 번째", showAsStickyNote: true)
+        let second = try app.addTask(title: "두 번째")
+        let third = try app.addTask(title: "세 번째")
+        let other = try app.addTask(title: "다른 분류", categoryID: otherCategory.id)
+        let future = try app.addTask(title: "예정", plannedDay: 20991231)
+        let completed = try app.addTask(title: "완료")
+        try app.setCompleted(id: completed.id, completed: true)
+        _ = try app.setReminder(id: second.id, localTime: ReminderLocalTime(year: 2099, month: 12, day: 31, hour: 9, minute: 0)!)
+        let before = try app.fetchSnapshot()
+        // Simulate a database created before manual ordering existed.
+        try executeLegacySQL("DROP TRIGGER reset_task_order_on_category_change; ALTER TABLE todos DROP COLUMN sort_order;", at: url)
+        let upgraded = try TodoStore(databaseURL: url)
+        try expect(try upgraded.fetchSnapshot() == before, "Order migration must preserve every existing row and its recency order")
+        let day = Calendar.current.dateInterval(of: .day, for: Date())!
+        let order = [second.id, first.id, third.id]
+        try upgraded.reorderTasks(ids: order, categoryID: category)
+        let widget = try TodoStore(databaseURL: url)
+        func currentOrder() throws -> [UUID] {
+            try widget.fetchSnapshot(dayRange: day).tasks.filter { !$0.isCompleted && $0.categoryID == category }.map(\.id)
+        }
+        try expect(try currentOrder() == order, "Saved order must survive reopening and be visible to other connections")
+        let pages = try (0..<3).flatMap { try widget.fetchPage(index: $0, pageSize: 2, dayRange: day).tasks }
+        try expect(pages.map(\.id) == order + [other.id, completed.id], "Widget pagination must apply manual order inside category before slicing")
+        let after = try app.fetchSnapshot()
+        try expect(Dictionary(uniqueKeysWithValues: after.tasks.map { ($0.id, $0) }) == Dictionary(uniqueKeysWithValues: before.tasks.map { ($0.id, $0) }), "Reordering must not change task fields")
+        try expect(after.stickyNotes == before.stickyNotes && after.reminders == before.reminders, "Reordering must preserve sticky notes and reminders")
+        for invalid in [[first.id, second.id], [first.id, first.id, third.id], [first.id, other.id, third.id], [first.id, future.id, third.id], [first.id, completed.id, third.id], [first.id, UUID(), third.id]] {
+            do {
+                try app.reorderTasks(ids: invalid, categoryID: category)
+                throw TestFailure(description: "Invalid or stale task order accepted")
+            } catch TodoStoreError.invalidTaskOrder {}
+        }
+        try expect(try currentOrder() == order, "Rejected orders must leave all ranks unchanged")
+        try executeLegacySQL("CREATE TRIGGER fail_task_order BEFORE UPDATE OF sort_order ON todos WHEN NEW.id = '\(second.id)' BEGIN SELECT RAISE(ABORT, 'order failure'); END;", at: url)
+        do {
+            try app.reorderTasks(ids: Array(order.reversed()), categoryID: category)
+            throw TestFailure(description: "Partial order failure ignored")
+        } catch TodoStoreError.database {}
+        try expect(try currentOrder() == order, "Partial order failure must roll back all ranks")
+        try executeLegacySQL("DROP TRIGGER fail_task_order", at: url)
+
+        try widget.setCompleted(id: first.id, completed: true)
+        try expect(try currentOrder() == [second.id, third.id], "Completing removes only that row from pending order")
+        try widget.setCompleted(id: first.id, completed: false)
+        try expect(try currentOrder() == order, "Undo returns a task to its saved position")
+        let added = try app.addTask(title: "새 항목")
+        try expect(try currentOrder() == [added.id] + order, "New items appear above the manually ordered list")
+        do {
+            try app.reorderTasks(ids: order, categoryID: category)
+            throw TestFailure(description: "Concurrent insertion was silently omitted")
+        } catch TodoStoreError.invalidTaskOrder {}
+
+        let backup = try app.exportBackup(to: directory)
+        let restored = try TodoStore(databaseURL: directory.appendingPathComponent("order-restored.sqlite"))
+        _ = try restored.restoreBackup(from: backup)
+        try expect(try restored.fetchSnapshot() == app.fetchSnapshot(), "Backup round trip preserves custom ordering")
+        let legacyBackup = directory.appendingPathComponent("order-v2.wtdtbackup")
+        try FileManager.default.copyItem(at: backup, to: legacyBackup)
+        try executeLegacySQL("DROP TRIGGER reset_task_order_on_category_change; ALTER TABLE todos DROP COLUMN sort_order; PRAGMA user_version = 2;", at: legacyBackup)
+        _ = try restored.restoreBackup(from: legacyBackup)
+        let legacyTasks = try restored.fetchSnapshot(dayRange: day).tasks.filter { !$0.isCompleted && $0.categoryID == category }
+        try expect(legacyTasks.map(\.id) == [added.id, third.id, second.id, first.id], "Version 2 backups restore without custom order")
+        try app.setCategory(id: first.id, categoryID: otherCategory.id)
+        try app.setCategory(id: first.id, categoryID: category)
+        try expect(try currentOrder() == [added.id, first.id, second.id, third.id], "Moving categories resets the old category's manual rank")
     }
 
     private static func testWidgetCategoryOrder(in directory: URL) throws {
