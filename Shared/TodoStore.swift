@@ -458,31 +458,10 @@ final class TodoStore: @unchecked Sendable {
         try finishWrite(statement)
     }
 
-    func setCompleted(id: UUID, completed: Bool, fromStickyNote: Bool = false) throws {
+    func setCompleted(id: UUID, completed: Bool) throws {
         lock.lock()
         defer { lock.unlock() }
 
-        if completed && fromStickyNote {
-            // Remember the source atomically with completion, only for an open,
-            // unfinished note. Retries must not overwrite the original source.
-            try withTransaction(readOnly: false) {
-                let statement = try prepare("""
-                    UPDATE sticky_notes SET reopen_on_completion_undo = 1
-                    WHERE todo_id = ? AND is_visible = 1
-                        AND EXISTS (SELECT 1 FROM todos
-                            WHERE id = sticky_notes.todo_id AND completed_at IS NULL)
-                    """)
-                defer { sqlite3_finalize(statement) }
-                try bind(id.uuidString, to: statement, at: 1)
-                try finishWrite(statement)
-                try writeCompletion(id: id, completed: completed)
-            }
-        } else {
-            try writeCompletion(id: id, completed: completed)
-        }
-    }
-
-    private func writeCompletion(id: UUID, completed: Bool) throws {
         let statement = try prepare("""
             UPDATE todos SET completed_at =
                 CASE WHEN ? THEN COALESCE(completed_at, ?) ELSE NULL END
@@ -899,6 +878,13 @@ final class TodoStore: @unchecked Sendable {
             // All writers (including the widget and MCP) restore the note on an
             // actual undo. Consuming the marker keeps repeated requests harmless.
             try execute("""
+                CREATE TRIGGER IF NOT EXISTS remember_sticky_visibility_on_completion
+                BEFORE UPDATE OF completed_at ON todos
+                WHEN OLD.completed_at IS NULL AND NEW.completed_at IS NOT NULL
+                BEGIN
+                    UPDATE sticky_notes SET reopen_on_completion_undo = is_visible
+                    WHERE todo_id = NEW.id;
+                END;
                 CREATE TRIGGER IF NOT EXISTS restore_sticky_note_on_completion_undo
                 AFTER UPDATE OF completed_at ON todos
                 WHEN OLD.completed_at IS NOT NULL AND NEW.completed_at IS NULL
