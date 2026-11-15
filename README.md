@@ -10,13 +10,19 @@
 </p>
 
 <p align="center">
-  <strong>v1.3.5</strong>
-  · <a href="https://github.com/choubung/what-to-do-today/releases/download/v1.3.5/WhatToDoToday-1.3.5.dmg"><strong>DMG 다운로드 (위젯 없음)</strong></a>
-  · <a href="https://github.com/choubung/what-to-do-today/blob/v1.3.5/docs/build.md#위젯-포함-앱-직접-설치"><strong>Xcode 설치 안내 (위젯 포함)</strong></a><br>
+  <strong>v1.4.0</strong>
+  · <a href="https://github.com/choubung/what-to-do-today/releases/download/v1.4.0/WhatToDoToday-1.4.0.dmg"><strong>DMG 다운로드 (위젯 없음)</strong></a>
+  · <a href="https://github.com/choubung/what-to-do-today/blob/v1.4.0/docs/build.md#위젯-포함-앱-직접-설치"><strong>Xcode 설치 안내 (위젯 포함)</strong></a><br>
   <a href="https://github.com/choubung/what-to-do-today/releases/latest">최신 릴리즈</a>
   · <a href="#설치하고-시작하기">최신 버전 설치 방법</a><br>
   <sub>Apple Silicon Mac · macOS 27.0.1 이상</sub>
 </p>
+
+## v1.4.0에서 달라진 점
+
+- **제목을 드래그해 순서 변경**: 같은 카테고리의 할 일 순서를 바꾸면 위젯에도 반영됩니다. 손잡이 없이 제목을 잡아 끌면 됩니다.
+- **완료 취소 시 포스트잇 복원**: 완료 직전에 떠 있던 포스트잇은 앱·위젯 어디서 완료했든 체크를 풀면 이전 위치와 크기로 다시 뜹니다.
+- **짧아진 완료 안내**: ‘완료했어요’ 팝업은 1초 후 사라집니다. 할 일·한 일에 같은 카테고리가 있을 때 헤더가 섞이던 문제도 고쳤습니다.
 
 ## 앱에서 목록 관리하기
 
@@ -53,12 +59,12 @@
 
 ## 설치하고 시작하기
 
-v1.3.5는 두 가지 방법으로 설치할 수 있습니다. 할 일 목록, 포스트잇, 알림, 완료 기록은 두 앱에서 모두 쓸 수 있어요.
+v1.4.0은 두 가지 방법으로 설치할 수 있습니다. 할 일 목록, 포스트잇, 알림, 완료 기록은 두 앱에서 모두 쓸 수 있어요.
 
 | 설치 방법 | 설치 순서 |
 | --- | --- |
-| **DMG로 설치 · 위젯 없음** | [v1.3.5 DMG](https://github.com/choubung/what-to-do-today/releases/download/v1.3.5/WhatToDoToday-1.3.5.dmg)를 내려받습니다. DMG를 열고 **What to Do Today (DMG)**를 **응용 프로그램** 폴더로 끌어 옮긴 뒤 엽니다. 공증되지 않은 앱이므로 첫 실행 시 [시스템 설정에서 ‘그래도 열기’](https://support.apple.com/ko-kr/102445)가 필요할 수 있습니다. |
-| **Xcode로 직접 설치 · 위젯 포함** | [v1.3.5 소스 ZIP](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.3.5.zip)을 받고 [직접 설치 안내](docs/build.md#위젯-포함-앱-직접-설치)에 따라 빌드합니다. 설치한 앱을 한 번 연 뒤 바탕화면의 **위젯 편집**에서 **할 일**을 추가합니다. |
+| **DMG로 설치 · 위젯 없음** | [v1.4.0 DMG](https://github.com/choubung/what-to-do-today/releases/download/v1.4.0/WhatToDoToday-1.4.0.dmg)를 내려받습니다. DMG를 열고 **What to Do Today (DMG)**를 **응용 프로그램** 폴더로 끌어 옮긴 뒤 엽니다. 공증되지 않은 앱이므로 첫 실행 시 [시스템 설정에서 ‘그래도 열기’](https://support.apple.com/ko-kr/102445)가 필요할 수 있습니다. |
+| **Xcode로 직접 설치 · 위젯 포함** | [v1.4.0 소스 ZIP](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.4.0.zip)을 받고 [직접 설치 안내](docs/build.md#위젯-포함-앱-직접-설치)에 따라 빌드합니다. 설치한 앱을 한 번 연 뒤 바탕화면의 **위젯 편집**에서 **할 일**을 추가합니다. |
 
 앱의 **할 일**에서 카테고리 옆 **＋**를 누르면 첫 할 일을 추가할 수 있습니다. `⌘N`은 작은 입력 창, `⌘1`은 목록 창을 엽니다.
 
@@ -70,7 +76,7 @@ v1.3.5는 두 가지 방법으로 설치할 수 있습니다. 할 일 목록, �
 2. 기존 앱에서 **파일 → 할 일 백업 내보내기…**를 선택하고 백업을 저장할 폴더를 고릅니다.
 3. 옮길 앱에서 **파일 → 할 일 백업 가져오기…**를 선택하고 방금 만든 `.wtdtbackup` 파일을 엽니다.
 
-할 일, 완료 기록, 카테고리, 포스트잇 설정, 예약 알림이 함께 옮겨집니다. 가져오면 대상 앱의 데이터가 백업 내용으로 바뀌며, 가져오기 직전의 데이터는 별도 백업에 보관됩니다. v1.3.4에서 내보낸 백업은 v1.3.5에서 가져올 수 있습니다. v1.3.5에서 내보낸 백업을 가져오려면 대상 앱도 v1.3.5 이상으로 업데이트하세요. 새 앱에서 알림 권한과 로그인 시 자동 실행을 다시 설정할 수 있습니다.
+할 일, 완료 기록, 카테고리, 포스트잇 설정, 예약 알림이 함께 옮겨집니다. 가져오면 대상 앱의 데이터가 백업 내용으로 바뀌며, 가져오기 직전의 데이터는 별도 백업에 보관됩니다. v1.3.4·v1.3.5에서 내보낸 백업도 가져올 수 있습니다. v1.4.0 백업에는 직접 정한 할 일 순서가 함께 저장되므로, 가져올 앱도 v1.4.0 이상으로 업데이트하세요. 새 앱에서 알림 권한과 로그인 시 자동 실행을 다시 설정할 수 있습니다.
 
 이미 설치했다면 메뉴 막대에서 앱을 종료하거나, 할 일 목록 창에서 `⌘Q`를 누른 뒤 [업데이트 절차](docs/build.md#위젯-포함-앱-직접-설치)를 따르세요. 설치 도구가 위젯도 함께 다시 시작합니다.
 
