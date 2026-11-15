@@ -119,7 +119,7 @@ final class StickyNoteCoordinator: NSObject {
         guard let frame = windows[task.id]?.window?.frame else { return }
         Task { [weak self] in
             guard let self else { return }
-            if await model.setCompleted(task, completed: true, fromStickyNote: true) {
+            if await model.setCompleted(task, completed: true) {
                 completionFeedback.show(near: frame)
             }
         }
