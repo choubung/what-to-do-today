@@ -1,5 +1,14 @@
 import SwiftUI
 
+// A category occurs in both status groups. Native List requires distinct IDs
+// to avoid reusing a completed header (without its add button) for pending tasks.
+private struct TodoCategorySectionIdentity: Identifiable {
+    let category: TodoCategory
+    let completed: Bool
+
+    var id: String { "\(completed ? "completed" : "pending"):\(category.id)" }
+}
+
 struct TodoListView: View {
     @ObservedObject var model: TodoListModel
     @ObservedObject var reminders: ReminderCoordinator
@@ -154,8 +163,8 @@ struct TodoListView: View {
                 .accessibilityAddTraits(.isHeader)
                 .padding(.top, completed ? 20 : 0)
                 .padding(.bottom, 6)
-            ForEach(categories) { category in
-                categorySection(category, tasks: grouped[category.id] ?? [], completed: completed)
+            ForEach(categories.map { TodoCategorySectionIdentity(category: $0, completed: completed) }) { section in
+                categorySection(section.category, tasks: grouped[section.category.id] ?? [], completed: completed)
             }
             if completed && tasks.isEmpty {
                 Text("아직 완료한 일이 없어요")
@@ -216,7 +225,7 @@ struct TodoListView: View {
                 } else {
                     let orderedTasks = displayedTasks(tasks, categoryID: category.id)
                     ForEach(orderedTasks) { task in
-                        taskRow(task, reorderable: true)
+                        taskRow(task)
                             .moveDisabled(model.isSaving || !pendingTaskOrders.isEmpty || tasks.contains { model.isCompleting($0.id) })
                     }
                     .onMove { offsets, destination in
@@ -248,17 +257,18 @@ struct TodoListView: View {
         return ids.compactMap { byID[$0] } + tasks.filter { !known.contains($0.id) }
     }
 
-    private func taskRow(_ task: TodoItem, upcoming: Bool = false, reorderable: Bool = false) -> some View {
-        TodoTaskRow(
-            model: model,
-            taskID: task.id,
-            upcoming: upcoming,
-            reorderable: reorderable,
-            edit: { editingTask = $0 },
-            delete: { deletingTask = $0 },
-            editReminder: { reminderTask = $0 },
-            didMoveCategory: showCategoryMoveNotice
-        )
+    private func taskRow(_ task: TodoItem, upcoming: Bool = false) -> some View {
+        HStack {
+            TodoTaskRow(
+                model: model,
+                taskID: task.id,
+                upcoming: upcoming,
+                edit: { editingTask = $0 },
+                delete: { deletingTask = $0 },
+                editReminder: { reminderTask = $0 },
+                didMoveCategory: showCategoryMoveNotice
+            )
+        }
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
     }
@@ -276,7 +286,6 @@ private struct TodoTaskRow: View {
     @ObservedObject var model: TodoListModel
     let taskID: UUID
     let upcoming: Bool
-    let reorderable: Bool
     let edit: (TodoItem) -> Void
     let delete: (TodoItem) -> Void
     let editReminder: (TodoItem) -> Void
@@ -304,7 +313,6 @@ private struct TodoTaskRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
-                .help(reorderable ? "드래그하여 같은 카테고리 안에서 순서 변경" : "")
                 .foregroundStyle(isCompleted ? .secondary : .primary)
                 .strikethrough(isCompleted, color: .secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
