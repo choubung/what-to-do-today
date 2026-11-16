@@ -10,18 +10,18 @@
 </p>
 
 <p align="center">
-  <strong>v1.4.1</strong>
-  · <a href="https://github.com/choubung/what-to-do-today/releases/download/v1.4.1/WhatToDoToday-1.4.1.dmg"><strong>DMG 다운로드 (위젯 없음)</strong></a>
-  · <a href="https://github.com/choubung/what-to-do-today/blob/v1.4.1/docs/build.md#위젯-포함-앱-직접-설치"><strong>Xcode 설치 안내 (위젯 포함)</strong></a><br>
+  <strong>v1.4.2</strong>
+  · <a href="https://github.com/choubung/what-to-do-today/releases/download/v1.4.2/WhatToDoToday-1.4.2.dmg"><strong>DMG 다운로드 (위젯 없음)</strong></a>
+  · <a href="https://github.com/choubung/what-to-do-today/blob/v1.4.2/docs/build.md#위젯-포함-앱-직접-설치"><strong>Xcode 설치 안내 (위젯 포함)</strong></a><br>
   <a href="https://github.com/choubung/what-to-do-today/releases/latest">최신 릴리스</a>
   · <a href="#설치하고-시작하기">설치 방법</a><br>
   <sub>Apple Silicon Mac · macOS 27.0.1 이상</sub>
 </p>
 
-## v1.4.1에서 달라진 점
+## v1.4.2에서 달라진 점
 
-- 다른 앱을 사용하는 중에도 전역 단축키로 새 할 일을 적거나 포스트잇을 숨기고 다시 띄울 수 있습니다. 설정에서 조합을 바꾸거나 해제할 수 있습니다.
-- 새 할 일은 같은 카테고리의 맨 아래에 추가됩니다.
+- 포스트잇 오른쪽 위 슬라이더로 각각의 불투명도를 30–100%로 조절할 수 있습니다. 설정은 앱을 다시 실행하거나 백업을 옮겨도 유지됩니다.
+- 포스트잇 상단의 빈 곳을 끌면 창을 옮길 수 있습니다. 이동 영역이 메뉴 막대 뒤에 가려지지 않도록 위치를 보정했습니다.
 
 ## 앱에서 목록 관리하기
 
@@ -60,13 +60,13 @@
 
 ### DMG로 설치 · 위젯 없음
 
-1. [v1.4.1 DMG 다운로드](https://github.com/choubung/what-to-do-today/releases/download/v1.4.1/WhatToDoToday-1.4.1.dmg)
+1. [v1.4.2 DMG 다운로드](https://github.com/choubung/what-to-do-today/releases/download/v1.4.2/WhatToDoToday-1.4.2.dmg)
 2. DMG를 열고 **What to Do Today (DMG)** 앱을 **응용 프로그램** 폴더로 끌어 옮긴 뒤 실행합니다.
 3. 앱에 Apple 공증이 적용되어 있지 않아 첫 실행 시 시스템 설정에서 ‘그래도 열기’를 눌러야 할 수 있습니다. [Apple의 첫 실행 안내](https://support.apple.com/ko-kr/102445)
 
 ### Xcode로 설치 · 위젯 포함
 
-1. [v1.4.1 소스 ZIP 다운로드](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.4.1.zip)
+1. [v1.4.2 소스 ZIP 다운로드](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.4.2.zip)
 2. 압축을 풀고 [직접 설치 안내](docs/build.md#위젯-포함-앱-직접-설치)에 따라 빌드합니다.
 3. 설치한 앱을 한 번 연 뒤, 바탕화면의 ‘**위젯 편집**’에서 ‘**할 일**’을 추가합니다.
 
@@ -96,7 +96,7 @@
 
 백업에는 할 일, 완료 기록, 카테고리, 포스트잇 설정, 예약 알림이 들어 있습니다. 가져오기를 실행하면 새 앱의 데이터는 백업 내용으로 바뀌고, 가져오기 직전 데이터는 별도 백업에 보관됩니다.
 
-이전 버전에서 만든 백업도 가져올 수 있습니다. 포스트잇 투명도 설정이 포함된 새 백업을 가져오려면 투명도 기능을 지원하는 버전이 필요합니다. 알림 권한과 로그인 시 자동 실행은 새 앱에서 다시 설정할 수 있습니다.
+이전 버전에서 만든 백업도 가져올 수 있습니다. 포스트잇 투명도 설정이 포함된 새 백업을 가져오려면 v1.4.2 이상이 필요합니다. 알림 권한과 로그인 시 자동 실행은 새 앱에서 다시 설정할 수 있습니다.
 
 ## 이렇게 사용하세요
 
