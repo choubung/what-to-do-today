@@ -1,5 +1,5 @@
 MARKETING_VERSION = 1.4.1
-CURRENT_PROJECT_VERSION = 44
+CURRENT_PROJECT_VERSION = 45
 TODO_URL_SCHEME = whattodotoday
 
 // Local signing settings apply to the widget-enabled app and its extension.

@@ -576,10 +576,15 @@ struct StickyNoteDragArea: NSViewRepresentable {
         override func mouseDragged(with event: NSEvent) {
             guard let window, let dragStart else { return }
             let pointer = window.convertPoint(toScreen: event.locationInWindow)
-            window.setFrameOrigin(CGPoint(
+            let origin = CGPoint(
                 x: dragStart.origin.x + pointer.x - dragStart.pointer.x,
                 y: dragStart.origin.y + pointer.y - dragStart.pointer.y
-            ))
+            )
+            // Keep the only move target below the menu bar, as native titlebar
+            // dragging did. Use the pointer's display so crossing screens works.
+            let screen = NSScreen.screens.first { $0.frame.contains(pointer) } ?? window.screen
+            let frame = NSRect(origin: origin, size: window.frame.size)
+            window.setFrameOrigin(window.constrainFrameRect(frame, to: screen).origin)
         }
 
         override func mouseUp(with event: NSEvent) {

@@ -157,6 +157,39 @@ private enum StickyNoteInteractionTests {
         slider.mouseDown(with: try event(.leftMouseDown, in: slider, at: CGPoint(x: 50, y: 27)))
         slider.mouseUp(with: try event(.leftMouseUp, in: slider, at: CGPoint(x: 50, y: 27)))
         try expect(panel.frame == movedFrame, "A preceding note move must not leak into the next slider gesture")
+
+        // The pointer can enter the menu bar during a drag. The only move target
+        // must remain visible there so the note can be grabbed and moved back.
+        guard let screen = panel.screen ?? NSScreen.main else {
+            throw InteractionFailure(description: "The test window has no display")
+        }
+        let upperStart = dragArea.convert(CGPoint(x: dragArea.bounds.midX, y: dragArea.bounds.midY), to: nil)
+        let upperTarget = CGPoint(x: screen.frame.midX, y: screen.frame.maxY - 1)
+        dragArea.mouseDown(with: try event(.leftMouseDown, window: panel, location: upperStart))
+        dragArea.mouseDragged(with: try event(
+            .leftMouseDragged, window: panel, location: panel.convertPoint(fromScreen: upperTarget)
+        ))
+        dragArea.mouseUp(with: try event(
+            .leftMouseUp, window: panel, location: panel.convertPoint(fromScreen: upperTarget)
+        ))
+        let upperDragRect = panel.convertToScreen(dragArea.convert(dragArea.bounds, to: nil))
+        try expect(screen.visibleFrame.contains(upperDragRect),
+                   "Dragging into the menu bar must keep the blank move target visible")
+        try expect(panel.frame.size == originalFrame.size, "Constraining a move must preserve the note's size")
+
+        let upperFrame = panel.frame
+        let recoveryStart = dragArea.convert(CGPoint(x: dragArea.bounds.midX, y: dragArea.bounds.midY), to: nil)
+        let recoveryScreenStart = panel.convertPoint(toScreen: recoveryStart)
+        let recoveryTarget = CGPoint(x: recoveryScreenStart.x, y: recoveryScreenStart.y - 60)
+        dragArea.mouseDown(with: try event(.leftMouseDown, window: panel, location: recoveryStart))
+        dragArea.mouseDragged(with: try event(
+            .leftMouseDragged, window: panel, location: panel.convertPoint(fromScreen: recoveryTarget)
+        ))
+        dragArea.mouseUp(with: try event(
+            .leftMouseUp, window: panel, location: panel.convertPoint(fromScreen: recoveryTarget)
+        ))
+        try expect(panel.frame.origin == CGPoint(x: upperFrame.minX, y: upperFrame.minY - 60),
+                   "A note at the top edge must remain draggable back into the screen")
         try expect(!panel.isVisible, "Interaction checks must never display a window")
     }
 
