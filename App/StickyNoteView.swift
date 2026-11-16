@@ -50,17 +50,11 @@ struct StickyNoteView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
+            HStack(spacing: 8) {
                 StickyNoteDragArea()
-                    .overlay {
-                        Capsule()
-                            .fill(.secondary.opacity(0.3))
-                            .frame(width: 30, height: 4)
-                            .allowsHitTesting(false)
-                    }
                 opacitySlider
             }
-            .frame(height: 24)
+            .frame(height: 28)
             .padding(.leading, 6)
             .padding(.trailing, 14)
 
@@ -140,7 +134,7 @@ struct StickyNoteView: View {
                 if !editing { saveOpacity() }
             }
         )
-        .frame(width: 50, height: 24)
+        .frame(width: 72, height: 28)
         .disabled(model.isCompleting(task.id))
     }
 
@@ -352,13 +346,19 @@ struct StickyNoteColorEditor: View {
     }
 }
 
-/// Keeps native slider tracking, keyboard and accessibility behavior, with quiet chrome.
-private struct CompactOpacitySlider: NSViewRepresentable {
+/// Keeps native keyboard and accessibility behavior, with a larger pointer target.
+struct CompactOpacitySlider: NSViewRepresentable {
     @Binding var value: Double
     let trackColor: NSColor
     let onEditingChanged: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: SliderView, context: Context) -> CGSize? {
+        // Without this, SwiftUI centers a 16 pt native control inside the proposed
+        // height, leaving gaps that can receive titlebar dragging instead.
+        CGSize(width: proposal.width ?? 72, height: proposal.height ?? 28)
+    }
 
     func makeNSView(context: Context) -> SliderView {
         let slider = SliderView()
@@ -398,15 +398,54 @@ private struct CompactOpacitySlider: NSViewRepresentable {
 
     final class SliderView: NSSlider {
         var onEditingChanged: ((Bool) -> Void)?
+        private var grabOffset: CGFloat?
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override var needsPanelToBecomeKey: Bool { true }
         override var mouseDownCanMoveWindow: Bool { false }
 
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .arrow) }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard !isHidden, bounds.contains(convert(point, from: superview)) else { return nil }
+            return self
+        }
+
         override func mouseDown(with event: NSEvent) {
-            guard isEnabled else { return }
+            guard isEnabled, let cell = cell as? NSSliderCell else { return }
+            window?.makeFirstResponder(self)
+            let point = convert(event.locationInWindow, from: nil)
+            let knob = cell.knobRect(flipped: isFlipped)
+            // Grab the thumb without a jump, even when aiming just above/below it.
+            grabOffset = (knob.minX...knob.maxX).contains(point.x) ? point.x - knob.midX : 0
             onEditingChanged?(true)
-            defer { onEditingChanged?(false) }
-            super.mouseDown(with: event)
+            updatePointerValue(event)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard grabOffset != nil else { return }
+            updatePointerValue(event)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard grabOffset != nil else { return }
+            updatePointerValue(event)
+            grabOffset = nil
+            onEditingChanged?(false)
+        }
+
+        private func updatePointerValue(_ event: NSEvent) {
+            guard let grabOffset, let cell = cell as? NSSliderCell else { return }
+            let point = convert(event.locationInWindow, from: nil)
+            let track = cell.barRect(flipped: isFlipped)
+            let inset = cell.knobRect(flipped: isFlipped).width / 2
+            let travel = track.width - 2 * inset
+            guard travel > 0 else { return }
+            let fraction = min(1, max(0, (point.x - grabOffset - track.minX - inset) / travel))
+            let value = (minValue + Double(fraction) * (maxValue - minValue)).rounded()
+            guard value != doubleValue else { return }
+            doubleValue = value
+            updateValueDescription()
+            sendAction(action, to: target)
         }
 
         func updateValueDescription() {
@@ -506,11 +545,12 @@ private struct StickyNoteResizeHandle: NSViewRepresentable {
 }
 
 /// Restrict moving to the top strip so selecting text and using controls never drag the note.
-private struct StickyNoteDragArea: NSViewRepresentable {
+struct StickyNoteDragArea: NSViewRepresentable {
     func makeNSView(context: Context) -> DragView { DragView() }
     func updateNSView(_ nsView: DragView, context: Context) {}
 
     final class DragView: NSView {
+        private var dragStart: (pointer: CGPoint, origin: CGPoint)?
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
             toolTip = "여기를 드래그해서 포스트잇 이동"
@@ -522,13 +562,30 @@ private struct StickyNoteDragArea: NSViewRepresentable {
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override var needsPanelToBecomeKey: Bool { true }
         override var acceptsFirstResponder: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
 
         override func resetCursorRects() {
             addCursorRect(bounds, cursor: .openHand)
         }
 
         override func mouseDown(with event: NSEvent) {
-            window?.performDrag(with: event)
+            guard let window else { return }
+            dragStart = (window.convertPoint(toScreen: event.locationInWindow), window.frame.origin)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let window, let dragStart else { return }
+            let pointer = window.convertPoint(toScreen: event.locationInWindow)
+            window.setFrameOrigin(CGPoint(
+                x: dragStart.origin.x + pointer.x - dragStart.pointer.x,
+                y: dragStart.origin.y + pointer.y - dragStart.pointer.y
+            ))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard dragStart != nil else { return }
+            mouseDragged(with: event)
+            dragStart = nil
         }
     }
 }

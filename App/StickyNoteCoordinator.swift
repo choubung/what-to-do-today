@@ -216,6 +216,7 @@ private final class StickyNoteHostingView: NSHostingView<StickyNoteView> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var needsPanelToBecomeKey: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
 }
 
 @MainActor
@@ -266,6 +267,9 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
         panel.backgroundColor = StickyNoteAppearance.background(for: note.effectiveColorHex)
         panel.minSize = StickyNoteLayout.minimumSize
         panel.tabbingMode = .disallowed
+        // Only the explicit blank drag area may move the note; titlebar gaps
+        // around the opacity control must never start a Window Server drag.
+        panel.isMovable = false
         panel.isMovableByWindowBackground = false
         panel.hasShadow = true
         panel.delegate = self
