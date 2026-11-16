@@ -213,6 +213,7 @@ private enum TaskStoreTests {
         try testCategoryOrder(in: directory)
         try testWidgetCategoryOrder(in: directory)
         try testTaskOrder(in: directory)
+        try testAppendToExistingTasks(in: directory)
 
         let startupFailures = ConcurrentFailures()
         // Opening an existing WAL database misses the initial journal-mode transition race.
@@ -245,9 +246,9 @@ private enum TaskStoreTests {
 
         let first = try appStore.addTask(title: "  오늘 할 일 📝  ")
         let second = try widgetStore.addTask(title: "회의 자료 '정리'\0하기")
-        try expect(try appStore.fetchTasks().map(\.id) == [second.id, first.id], "Newest incomplete task should appear first")
-        try expect(try widgetStore.fetchTasks().last?.title == "오늘 할 일 📝", "Unicode title should round-trip and trim")
-        try expect(try appStore.fetchTasks().first?.title == second.title, "Embedded null and quotes should round-trip")
+        try expect(try appStore.fetchTasks().map(\.id) == [first.id, second.id], "New incomplete tasks should append after existing tasks")
+        try expect(try widgetStore.fetchTasks().first?.title == "오늘 할 일 📝", "Unicode title should round-trip and trim")
+        try expect(try appStore.fetchTasks().last?.title == second.title, "Embedded null and quotes should round-trip")
 
         try appStore.setCompleted(id: second.id, completed: true)
         let completedAt = try widgetStore.fetchTasks().last?.completedAt
@@ -292,6 +293,11 @@ private enum TaskStoreTests {
         let persisted = try TodoStore(databaseURL: databaseURL).fetchTasks()
         try expect(persisted.count == 161, "Concurrent connections must preserve every write")
         try expect(Set(persisted.map(\.id)).count == 161, "Stored task IDs must remain unique")
+        // Duplicate ranks would make the newer concurrent insert sort before the older one.
+        try executeLegacySQL("""
+            CREATE TEMP TABLE assert_unique_order (valid INTEGER CHECK (valid = 1));
+            INSERT INTO assert_unique_order SELECT COUNT(*) = COUNT(DISTINCT sort_order) FROM todos;
+            """, at: databaseURL)
         let largePage = try appStore.fetchPage(index: 0, pageSize: Int.max)
         try expect(largePage.pageCount == 1 && largePage.tasks.count == 161, "Large page sizes must not overflow")
         try testStickyNotePersistence(in: directory)
@@ -912,8 +918,9 @@ private enum TaskStoreTests {
         let completed = try app.addTask(title: "완료")
         try app.setCompleted(id: completed.id, completed: true)
         _ = try app.setReminder(id: second.id, localTime: ReminderLocalTime(year: 2099, month: 12, day: 31, hour: 9, minute: 0)!)
-        let before = try app.fetchSnapshot()
         // Simulate a database created before manual ordering existed.
+        try executeLegacySQL("UPDATE todos SET sort_order = NULL", at: url)
+        let before = try app.fetchSnapshot()
         try executeLegacySQL("DROP TRIGGER reset_task_order_on_category_change; ALTER TABLE todos DROP COLUMN sort_order;", at: url)
         let upgraded = try TodoStore(databaseURL: url)
         try expect(try upgraded.fetchSnapshot() == before, "Order migration must preserve every existing row and its recency order")
@@ -950,7 +957,9 @@ private enum TaskStoreTests {
         try widget.setCompleted(id: first.id, completed: false)
         try expect(try currentOrder() == order, "Undo returns a task to its saved position")
         let added = try app.addTask(title: "새 항목")
-        try expect(try currentOrder() == [added.id] + order, "New items appear above the manually ordered list")
+        try expect(try currentOrder() == order + [added.id], "New items append below the manually ordered list")
+        let updatedPages = try (0..<3).flatMap { try widget.fetchPage(index: $0, pageSize: 2, dayRange: day).tasks }
+        try expect(updatedPages.map(\.id) == order + [added.id, other.id, completed.id], "Widget pages include new tasks at the end of their category")
         do {
             try app.reorderTasks(ids: order, categoryID: category)
             throw TestFailure(description: "Concurrent insertion was silently omitted")
@@ -968,7 +977,38 @@ private enum TaskStoreTests {
         try expect(legacyTasks.map(\.id) == [added.id, third.id, second.id, first.id], "Version 2 backups restore without custom order")
         try app.setCategory(id: first.id, categoryID: otherCategory.id)
         try app.setCategory(id: first.id, categoryID: category)
-        try expect(try currentOrder() == [added.id, first.id, second.id, third.id], "Moving categories resets the old category's manual rank")
+        try expect(try currentOrder() == [first.id, second.id, third.id, added.id], "Moving categories resets the old category's manual rank")
+    }
+
+    private static func testAppendToExistingTasks(in directory: URL) throws {
+        let url = directory.appendingPathComponent("append-existing.sqlite")
+        let store = try TodoStore(databaseURL: url)
+        let category = try store.fetchCategories()[0]
+        let first = try store.addTask(title: "기존 항목 1")
+        let second = try store.addTask(title: "기존 항목 2")
+        try executeLegacySQL("""
+            UPDATE todos SET sort_order = NULL;
+            UPDATE todos SET created_at = 100 WHERE id = '\(first.id.uuidString)';
+            UPDATE todos SET created_at = 200 WHERE id = '\(second.id.uuidString)';
+            """, at: url)
+        let reopened = try TodoStore(databaseURL: url)
+        try expect(try reopened.fetchTasks().map(\.id) == [second.id, first.id], "Opening legacy rows preserves their displayed order")
+        let added = try reopened.addTask(title: "새 항목")
+        let named = try reopened.addTask(title: "채팅에서 추가", categoryName: category.name).task
+        try expect(try store.fetchTasks().map(\.id) == [second.id, first.id, added.id, named.id], "All add entry points append after legacy NULL ranks and previously added rows")
+
+        let future = try reopened.addTask(title: "예정", plannedDay: 20991231)
+        try reopened.setCompleted(id: named.id, completed: true)
+        let last = try reopened.addTask(title: "마지막")
+        try reopened.setCompleted(id: named.id, completed: false)
+        try expect(try store.fetchTasks().map(\.id) == [second.id, first.id, added.id, named.id, future.id, last.id], "New ranks do not reuse completed or future tasks' positions")
+
+        let backup = try store.exportBackup(to: directory)
+        let restored = try TodoStore(databaseURL: directory.appendingPathComponent("append-restored.sqlite"))
+        _ = try restored.restoreBackup(from: backup)
+        let previous = try restored.fetchTasks().map(\.id)
+        let restoredAdd = try restored.addTask(title: "복원 후 추가")
+        try expect(try restored.fetchTasks().map(\.id) == previous + [restoredAdd.id], "Adding after restore preserves the complete imported order")
     }
 
     private static func testWidgetCategoryOrder(in directory: URL) throws {
@@ -993,14 +1033,14 @@ private enum TaskStoreTests {
 
         try app.reorderCategories(ids: [work.id, defaultID])
         let firstTwo = try widget.fetchPage(index: 0, pageSize: 2, dayRange: day)
-        try expect(firstTwo.tasks.map(\.id) == [newerWork.id, olderWork.id], "Apply category order before selecting the rows for each page")
+        try expect(firstTwo.tasks.map(\.id) == [olderWork.id, newerWork.id], "Apply category order before selecting the rows for each page")
         let pages = try (0..<2).map { try widget.fetchPage(index: $0, pageSize: 3, dayRange: day) }
-        try expect(pages[0].tasks.map(\.id) == [newerWork.id, olderWork.id, defaultTask.id], "Category order takes priority over recency across categories")
+        try expect(pages[0].tasks.map(\.id) == [olderWork.id, newerWork.id, defaultTask.id], "Category order takes priority over insertion order across categories")
         try expect(pages[1].tasks.map(\.id) == [doneWork.id, doneDefault.id], "Completed rows follow the same category order after unfinished rows")
 
         try app.reorderCategories(ids: [defaultID, work.id])
         let updated = try widget.fetchPage(index: 0, pageSize: 8, dayRange: day)
-        try expect(updated.tasks.map(\.id) == [defaultTask.id, newerWork.id, olderWork.id, doneDefault.id, doneWork.id], "An open widget connection sees the new app category order")
+        try expect(updated.tasks.map(\.id) == [defaultTask.id, olderWork.id, newerWork.id, doneDefault.id, doneWork.id], "An open widget connection sees the new app category order")
     }
 
     private static func testPlannedTasks(in directory: URL) throws {
