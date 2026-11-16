@@ -2,7 +2,7 @@
 
 ## 위젯 포함 앱 직접 설치
 
-macOS 27.0.1 이상과 macOS 27 SDK를 포함한 Xcode가 필요합니다. [v1.4.0 소스 ZIP](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.4.0.zip)을 받고 압축을 푸세요. Xcode의 **Settings → Accounts**에서 Apple 계정을 추가합니다. 본인 Mac에 빌드할 때는 무료 **Personal Team**을 사용할 수 있으며 개발용 프로파일이 만료되면 다시 빌드합니다.
+macOS 27.0.1 이상과 macOS 27 SDK를 포함한 Xcode가 필요합니다. [v1.4.1 소스 ZIP](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.4.1.zip)을 받고 압축을 푸세요. Xcode의 **Settings → Accounts**에서 Apple 계정을 추가합니다. 본인 Mac에 빌드할 때는 무료 **Personal Team**을 사용할 수 있으며 개발용 프로파일이 만료되면 다시 빌드합니다.
 
 저장소 루트에 `Signing.xcconfig`를 만들고 Xcode 계정의 Team ID를 입력합니다.
 
@@ -27,7 +27,7 @@ bash Scripts/install.sh "/path/to/What to Do Today.app"
 Apple Silicon Mac에서 실행합니다. 스크립트는 `WhatToDoTodayStandalone` 스킴을 Release로 빌드하고, 위젯을 포함하지 않는 앱과 응용 프로그램 바로가기를 DMG에 담습니다. 개발 팀 설정과 유료 멤버십은 필요 없습니다.
 
 ```sh
-bash Scripts/build-dmg.sh "./WhatToDoToday-1.4.0.dmg"
+bash Scripts/build-dmg.sh "./WhatToDoToday-1.4.1.dmg"
 ```
 
 두 스킴의 버전과 빌드 번호는 `Configuration.xcconfig`에서 함께 관리합니다. DMG에는 Apple 공증이 적용되지 않습니다. DMG 설치와 기존 할 일 이동은 [README의 설치 방법](../README.md#설치하고-시작하기)을 따르세요.

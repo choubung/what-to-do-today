@@ -65,6 +65,16 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDe
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenu()
         configureStatusItem()
+        GlobalShortcuts.shared.onAction = { [weak self] action in
+            guard let self, !isPreparingToTerminate, !isTransferringData else { return }
+            statusItem?.expandedInterfaceSession?.cancel()
+            switch action {
+            case .newTask: showQuickAdd()
+            case .restoreNotes: restoreHiddenStickyNotes()
+            case .hideNotes: hideAllStickyNotes()
+            }
+        }
+        GlobalShortcuts.shared.start()
         _ = stickyNotes
         reminders.onOpenList = { [weak self] in self?.showMainWindow() }
         reminders.start()
@@ -141,6 +151,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDe
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        GlobalShortcuts.shared.stop()
         reminders.stop()
         dayBoundaryTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
@@ -164,7 +175,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDe
         Task { _ = await model.hideAllStickyNotes() }
     }
 
-    private func restoreHiddenStickyNotes() {
+    @objc private func restoreHiddenStickyNotes() {
         Task { _ = await model.restoreHiddenStickyNotes() }
     }
 
@@ -253,6 +264,7 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDe
             defer: false
         )
         panel.title = "새 할 일"
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .canJoinAllApplications]
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.delegate = self
@@ -296,17 +308,17 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDe
         panel.onCancel = { [weak session] in session?.cancel() }
 
         let content = NSHostingView(rootView: VStack(alignment: .leading, spacing: 3) {
-            statusAction("할 일 목록 열기", icon: "checklist", action: showMainWindow)
-            statusAction("새 할 일", icon: "plus", action: showQuickAdd)
-            statusAction("포스트잇 모두 숨기기", icon: "eye.slash", action: hideAllStickyNotes)
+            statusAction("할 일 목록 열기", icon: "checklist", shortcut: "⌘1", action: showMainWindow)
+            statusAction("새 할 일", icon: "plus", shortcut: shortcutLabel(for: .newTask), action: showQuickAdd)
+            statusAction("포스트잇 모두 숨기기", icon: "eye.slash", shortcut: shortcutLabel(for: .hideNotes), action: hideAllStickyNotes)
                 .disabled(model.visibleStickyCount == 0 || model.isSaving)
-            statusAction("포스트잇 그대로 띄우기", icon: "eye", action: restoreHiddenStickyNotes)
+            statusAction("포스트잇 그대로 띄우기", icon: "eye", shortcut: shortcutLabel(for: .restoreNotes), action: restoreHiddenStickyNotes)
                 .disabled(!model.canRestoreStickyNotes || model.isSaving)
             Divider().padding(.vertical, 3)
-            statusAction("What to Do Today 종료", icon: "power") { NSApp.terminate(nil) }
+            statusAction("What to Do Today 종료", icon: "power", shortcut: "⌘Q") { NSApp.terminate(nil) }
         }
         .padding(8)
-        .frame(width: 225)
+        .frame(width: 295)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 13))
         .allowsWindowActivationEvents())
         panel.contentView = content
@@ -325,12 +337,24 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDe
         panel?.close()
     }
 
-    private func statusAction(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+    private func shortcutLabel(for action: ShortcutAction) -> String? {
+        GlobalShortcuts.shared.registeredShortcut(for: action)?.displayText
+    }
+
+    private func statusAction(_ title: String, icon: String, shortcut: String? = nil, action: @escaping () -> Void) -> some View {
         Button {
             self.statusItem?.expandedInterfaceSession?.cancel()
             action()
         } label: {
-            Label(title, systemImage: icon)
+            HStack(spacing: 16) {
+                Label(title, systemImage: icon)
+                Spacer(minLength: 0)
+                if let shortcut {
+                    Text(shortcut)
+                        .font(.callout.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
@@ -430,6 +454,9 @@ final class TodoApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDe
         let hideNotesItem = NSMenuItem(title: "포스트잇 모두 숨기기", action: #selector(hideAllStickyNotes), keyEquivalent: "")
         hideNotesItem.target = self
         fileMenu.addItem(hideNotesItem)
+        let restoreNotesItem = NSMenuItem(title: "포스트잇 그대로 띄우기", action: #selector(restoreHiddenStickyNotes), keyEquivalent: "")
+        restoreNotesItem.target = self
+        fileMenu.addItem(restoreNotesItem)
         fileMenu.addItem(.separator())
         let exportItem = fileMenu.addItem(withTitle: "할 일 백업 내보내기…", action: #selector(exportData), keyEquivalent: "")
         exportItem.target = self

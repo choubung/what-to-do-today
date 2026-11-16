@@ -31,6 +31,11 @@ xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
   -o "$build_dir/reminder-tests"
 "$build_dir/reminder-tests"
 
+xcrun swiftc -swift-version 6 -module-cache-path "$build_dir/modules" \
+  App/GlobalShortcuts.swift Tests/GlobalShortcutTests.swift \
+  -o "$build_dir/shortcut-tests"
+"$build_dir/shortcut-tests"
+
 xcrun swiftc -typecheck -swift-version 6 \
   -target "$(uname -m)-apple-macos27.0.1" \
   -module-cache-path "$build_dir/modules" Shared/*.swift App/*.swift

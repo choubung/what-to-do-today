@@ -250,7 +250,13 @@ final class TodoStore: @unchecked Sendable {
 
     private func insertTask(title: String, categoryID: UUID, showAsStickyNote: Bool, plannedDay: Int? = nil) throws -> TodoItem {
         let task = TodoItem(id: UUID(), title: title, createdAt: Date(), completedAt: nil, categoryID: categoryID, plannedDay: plannedDay)
-        let statement = try prepare("INSERT INTO todos (id, title, created_at, category_id, planned_day) VALUES (?, ?, ?, ?, ?)")
+        // Keep existing positions and append within the category. The caller's write
+        // transaction also serializes additions from other app or MCP connections.
+        let statement = try prepare("""
+            INSERT INTO todos (id, title, created_at, category_id, planned_day, sort_order)
+            VALUES (?1, ?2, ?3, ?4, ?5,
+                (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM todos WHERE category_id = ?4))
+            """)
         defer { sqlite3_finalize(statement) }
         try bind(task.id.uuidString, to: statement, at: 1)
         try bind(task.title, to: statement, at: 2)
@@ -900,7 +906,7 @@ final class TodoStore: @unchecked Sendable {
                 try execute("ALTER TABLE todos ADD COLUMN planned_day INTEGER")
             }
             if try !tableColumns("todos").contains("sort_order") {
-                // NULL retains recency order for existing and newly added tasks.
+                // NULL retains the existing recency order when upgrading older databases.
                 try execute("ALTER TABLE todos ADD COLUMN sort_order INTEGER")
             }
             try execute("""

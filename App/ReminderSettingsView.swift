@@ -12,41 +12,47 @@ struct AppSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("설정").font(.headline)
-            GroupBox("포스트잇") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Stepper(value: Binding(
-                        get: { model.defaultStickyFontSize },
-                        set: changeFontSize
-                    ), in: StickyNoteTypography.minimumFontSize...StickyNoteTypography.maximumFontSize, step: 1) {
-                        Text("공통 글자 크기  \(model.defaultStickyFontSize.formatted()) pt")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    ShortcutSettingsView()
+                    GroupBox("포스트잇") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Stepper(value: Binding(
+                                get: { model.defaultStickyFontSize },
+                                set: changeFontSize
+                            ), in: StickyNoteTypography.minimumFontSize...StickyNoteTypography.maximumFontSize, step: 1) {
+                                Text("공통 글자 크기  \(model.defaultStickyFontSize.formatted()) pt")
+                            }
+                            .disabled(isSavingFontSize || model.isLoading)
+                            Button("기본 크기 (17 pt)") {
+                                changeFontSize(StickyNoteTypography.defaultFontSize)
+                            }
+                            .disabled(isSavingFontSize || model.isLoading || model.defaultStickyFontSize == StickyNoteTypography.defaultFontSize)
+                            Text("개별 글자 크기를 지정한 포스트잇은 해당 설정을 따릅니다.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Button("모두 숨기기") { Task { _ = await model.hideAllStickyNotes() } }
+                                .disabled(model.visibleStickyCount == 0 || model.isSaving)
+                        }
+                        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .disabled(isSavingFontSize || model.isLoading)
-                    Button("기본 크기 (17 pt)") {
-                        changeFontSize(StickyNoteTypography.defaultFontSize)
+                    Text("알림 및 자동 실행").font(.headline)
+                    ReminderAccessPanel(coordinator: coordinator)
+                    Divider()
+                    Toggle("로그인 시 자동 실행", isOn: Binding(
+                        get: { coordinator.startsAtLogin },
+                        set: { enabled in Task { await coordinator.setStartsAtLogin(enabled) } }
+                    ))
+                    Text("로그인 시 자동 실행을 켜면 앱을 직접 열기 전에도 놓친 알림을 묶어 전달합니다. 창을 닫아도 알림은 계속됩니다. 메뉴 막대에서 앱을 종료하면 다음 실행까지 알림이 멈춥니다.")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let error = model.errorMessage ?? coordinator.errorMessage {
+                        Text(error).font(.callout).foregroundStyle(.red)
                     }
-                    .disabled(isSavingFontSize || model.isLoading || model.defaultStickyFontSize == StickyNoteTypography.defaultFontSize)
-                    Text("개별 글자 크기를 지정한 포스트잇은 해당 설정을 따릅니다.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("모두 숨기기") { Task { _ = await model.hideAllStickyNotes() } }
-                        .disabled(model.visibleStickyCount == 0 || model.isSaving)
                 }
-                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Text("알림 및 자동 실행").font(.headline)
-            ReminderAccessPanel(coordinator: coordinator)
-            Divider()
-            Toggle("로그인 시 자동 실행", isOn: Binding(
-                get: { coordinator.startsAtLogin },
-                set: { enabled in Task { await coordinator.setStartsAtLogin(enabled) } }
-            ))
-            Text("로그인 시 자동 실행을 켜면 앱을 직접 열기 전에도 놓친 알림을 묶어 전달합니다. 창을 닫아도 알림은 계속됩니다. 메뉴 막대에서 앱을 종료하면 다음 실행까지 알림이 멈춥니다.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let error = model.errorMessage ?? coordinator.errorMessage {
-                Text(error).font(.callout).foregroundStyle(.red)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack { Spacer(); Button("완료") { dismiss() }.keyboardShortcut(.cancelAction) }
         }
-        .padding(24).frame(width: 440)
+        .padding(24).frame(width: 480, height: 640)
         .interactiveDismissDisabled(isSavingFontSize)
         .task { await coordinator.refreshAccess() }
     }
