@@ -18,6 +18,7 @@ enum TodoStoreError: LocalizedError {
     case invalidPosition
     case invalidSize
     case invalidFontSize
+    case invalidOpacity
     case invalidColor
     case invalidRecord
     case invalidBackup
@@ -57,6 +58,8 @@ enum TodoStoreError: LocalizedError {
             return "포스트잇 크기를 저장할 수 없어요."
         case .invalidFontSize:
             return "포스트잇 글자 크기를 저장할 수 없어요."
+        case .invalidOpacity:
+            return "포스트잇 불투명도는 \(StickyNoteState.opacityRange.lowerBound)–100%로 설정해 주세요."
         case .invalidColor:
             return "포스트잇 색상이 올바르지 않아요. 다시 선택해 주세요."
         case .invalidRecord:
@@ -601,6 +604,17 @@ final class TodoStore: @unchecked Sendable {
         try finishWrite(statement)
     }
 
+    func saveStickyOpacity(id: UUID, opacity: Int) throws {
+        guard StickyNoteState.opacityRange.contains(opacity) else { throw TodoStoreError.invalidOpacity }
+        lock.lock()
+        defer { lock.unlock() }
+        let statement = try prepare("UPDATE sticky_notes SET opacity = ? WHERE todo_id = ?")
+        defer { sqlite3_finalize(statement) }
+        try check(sqlite3_bind_int(statement, 1, Int32(opacity)))
+        try bind(id.uuidString, to: statement, at: 2)
+        try finishWrite(statement, requiresExistingTask: true)
+    }
+
     func saveDefaultStickyFontSize(_ fontSize: Double) throws {
         try validateFontSize(fontSize)
         lock.lock()
@@ -800,6 +814,11 @@ final class TodoStore: @unchecked Sendable {
                     (length(color_hex) = 7 AND substr(color_hex, 1, 1) = '#'
                      AND substr(color_hex, 2) NOT GLOB '*[^0-9A-F]*'))
                 """
+            let opacityColumn = """
+                opacity INTEGER NOT NULL DEFAULT \(StickyNoteState.defaultOpacity)
+                    CHECK (typeof(opacity) = 'integer' AND opacity BETWEEN \(StickyNoteState.opacityRange.lowerBound)
+                        AND \(StickyNoteState.opacityRange.upperBound))
+                """
             try execute("""
                 CREATE TABLE IF NOT EXISTS categories (
                     id TEXT PRIMARY KEY NOT NULL,
@@ -831,6 +850,7 @@ final class TodoStore: @unchecked Sendable {
                     height REAL CHECK (height > 0),
                     \(fontSizeColumn),
                     \(colorColumn),
+                    \(opacityColumn),
                     CHECK ((position_x IS NULL AND position_y IS NULL)
                         OR (position_x IS NOT NULL AND position_y IS NOT NULL))
                 );
@@ -877,6 +897,9 @@ final class TodoStore: @unchecked Sendable {
             }
             if !columns.contains("color_hex") {
                 try execute("ALTER TABLE sticky_notes ADD COLUMN \(colorColumn)")
+            }
+            if !columns.contains("opacity") {
+                try execute("ALTER TABLE sticky_notes ADD COLUMN \(opacityColumn)")
             }
             if !columns.contains("reopen_on_completion_undo") {
                 try execute("ALTER TABLE sticky_notes ADD COLUMN reopen_on_completion_undo INTEGER NOT NULL DEFAULT 0 CHECK (reopen_on_completion_undo IN (0, 1))")
@@ -1034,7 +1057,7 @@ final class TodoStore: @unchecked Sendable {
     private func readStickyNotes(dayRange: DateInterval?) throws -> [StickyNoteState] {
         let statement = try prepare("""
             SELECT todo_id, is_visible, is_always_on_top, position_x, position_y, display_id, width, height, font_size, color_hex,
-                (SELECT sticky_color_hex FROM categories WHERE id = todos.category_id)
+                (SELECT sticky_color_hex FROM categories WHERE id = todos.category_id), opacity
             FROM sticky_notes JOIN todos ON todos.id = sticky_notes.todo_id
             \(dayFilter)
             ORDER BY todo_id
@@ -1095,7 +1118,8 @@ final class TodoStore: @unchecked Sendable {
                 size: size,
                 fontSize: fontSize,
                 colorHex: colorHex,
-                categoryColorHex: sqlite3_column_type(statement, 10) == SQLITE_NULL ? nil : stringColumn(statement, index: 10)
+                categoryColorHex: sqlite3_column_type(statement, 10) == SQLITE_NULL ? nil : stringColumn(statement, index: 10),
+                opacity: Int(sqlite3_column_int(statement, 11))
             ))
             result = sqlite3_step(statement)
         }
@@ -1377,7 +1401,7 @@ final class TodoStore: @unchecked Sendable {
 
 extension TodoStore {
     private static let backupID = 0x57544454 // WTDT
-    private static let backupVersion = 3
+    private static let backupVersion = 4
 
     // Copy data into our own schema so a backup can't install tables, triggers or views.
     // Keep this list and the backup format version in sync with future schema changes.
@@ -1395,9 +1419,14 @@ extension TodoStore {
         return (name: table.name, columns: table.columns + ", reopen_on_completion_undo")
     } + [(name: "sticky_note_restore", columns: "todo_id")]
 
-    private static let backupTables = version2BackupTables.map { table in
+    private static let version3BackupTables = version2BackupTables.map { table in
         guard table.name == "todos" else { return table }
         return (name: table.name, columns: table.columns + ", sort_order")
+    }
+
+    private static let backupTables = version3BackupTables.map { table in
+        guard table.name == "sticky_notes" else { return table }
+        return (name: table.name, columns: table.columns + ", opacity")
     }
 
     func exportBackup(to folder: URL) throws -> URL {
@@ -1476,6 +1505,7 @@ extension TodoStore {
             switch try value("PRAGMA transfer.user_version") {
             case "1": tables = Self.legacyBackupTables
             case "2": tables = Self.version2BackupTables
+            case "3": tables = Self.version3BackupTables
             case String(Self.backupVersion): tables = Self.backupTables
             default: throw TodoStoreError.invalidBackup
             }

@@ -124,6 +124,10 @@ private actor TodoRepository {
         try connection().saveDefaultStickyFontSize(fontSize)
     }
 
+    func saveStickyOpacity(id: UUID, opacity: Int) throws {
+        try connection().saveStickyOpacity(id: id, opacity: opacity)
+    }
+
     func saveCategoryStickyColor(id: UUID, colorHex: String?) throws {
         try connection().saveCategoryStickyColor(id: id, colorHex: colorHex)
     }
@@ -436,6 +440,12 @@ final class TodoListModel: ObservableObject {
     func setStickyColor(id: UUID, colorHex: String?) async -> Bool {
         await saveStickyAppearance(failureMessage: Self.colorErrorMessage) {
             try await self.repository.saveStickyColor(id: id, colorHex: colorHex)
+        }
+    }
+
+    func setStickyOpacity(id: UUID, opacity: Int) async -> Bool {
+        await saveStickyAppearance(failureMessage: "포스트잇 투명도를 저장하지 못했어요. 다시 조정해 주세요.") {
+            try await self.repository.saveStickyOpacity(id: id, opacity: opacity)
         }
     }
 

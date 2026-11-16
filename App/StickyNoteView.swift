@@ -32,10 +32,14 @@ struct StickyNoteView: View {
     @ObservedObject var model: TodoListModel
     let task: TodoItem
     let note: StickyNoteState
+    let onPreviewOpacity: (Int?) -> Void
     let onHide: () -> Void
     let onComplete: () -> Void
     @State private var isChangingFontSize = false
     @State private var isEditingColor = false
+    @State private var isDraggingOpacity = false
+    @State private var draftOpacity: Double?
+    @State private var opacitySaveVersion = 0
     @Environment(\.colorScheme) private var colorScheme
 
     private var fontSize: Double { model.effectiveStickyFontSize(for: note) }
@@ -46,17 +50,15 @@ struct StickyNoteView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            StickyNoteDragArea()
-                .frame(height: 24)
-                .overlay {
-                    Capsule()
-                        .fill(.secondary.opacity(0.3))
-                        .frame(width: 30, height: 4)
-                        .allowsHitTesting(false)
-                }
-                .padding(.horizontal, 6)
+            HStack(spacing: 8) {
+                StickyNoteDragArea()
+                opacitySlider
+            }
+            .frame(height: 28)
+            .padding(.leading, 6)
+            .padding(.trailing, 14)
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 controls
 
                 ScrollView {
@@ -97,7 +99,7 @@ struct StickyNoteView: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.bottom, 14)
+            .padding(.bottom, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: note.effectiveColorHex)))
@@ -116,6 +118,35 @@ struct StickyNoteView: View {
                 await model.setStickyColor(id: task.id, colorHex: colorHex)
             }
             .environment(\.colorScheme, colorScheme)
+        }
+    }
+
+    private var opacitySlider: some View {
+        CompactOpacitySlider(
+            value: Binding(get: { draftOpacity ?? Double(note.opacity) }, set: { value in
+                draftOpacity = value
+                onPreviewOpacity(Int(value))
+                if !isDraggingOpacity { saveOpacity() }
+            }),
+            trackColor: StickyNoteAppearance.foreground(for: note.effectiveColorHex),
+            onEditingChanged: { editing in
+                isDraggingOpacity = editing
+                if !editing { saveOpacity() }
+            }
+        )
+        .frame(width: 72, height: 28)
+        .disabled(model.isCompleting(task.id))
+    }
+
+    private func saveOpacity() {
+        guard let draftOpacity else { return }
+        opacitySaveVersion += 1
+        let version = opacitySaveVersion
+        Task {
+            _ = await model.setStickyOpacity(id: task.id, opacity: Int(draftOpacity))
+            guard version == opacitySaveVersion, !isDraggingOpacity else { return }
+            self.draftOpacity = nil
+            onPreviewOpacity(nil)
         }
     }
 
@@ -315,6 +346,140 @@ struct StickyNoteColorEditor: View {
     }
 }
 
+/// Keeps native keyboard and accessibility behavior, with a larger pointer target.
+struct CompactOpacitySlider: NSViewRepresentable {
+    @Binding var value: Double
+    let trackColor: NSColor
+    let onEditingChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: SliderView, context: Context) -> CGSize? {
+        // Without this, SwiftUI centers a 16 pt native control inside the proposed
+        // height, leaving gaps that can receive titlebar dragging instead.
+        CGSize(width: proposal.width ?? 72, height: proposal.height ?? 28)
+    }
+
+    func makeNSView(context: Context) -> SliderView {
+        let slider = SliderView()
+        slider.cell = SliderCell()
+        slider.minValue = Double(StickyNoteState.opacityRange.lowerBound)
+        slider.maxValue = Double(StickyNoteState.opacityRange.upperBound)
+        slider.isContinuous = true
+        slider.controlSize = .mini
+        slider.target = context.coordinator
+        slider.action = #selector(Coordinator.valueChanged(_:))
+        slider.setAccessibilityLabel("포스트잇 투명도")
+        slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return slider
+    }
+
+    func updateNSView(_ slider: SliderView, context: Context) {
+        context.coordinator.parent = self
+        slider.onEditingChanged = onEditingChanged
+        slider.doubleValue = value
+        slider.isEnabled = context.environment.isEnabled
+        (slider.cell as? SliderCell)?.trackColor = trackColor
+        slider.updateValueDescription()
+        slider.needsDisplay = true
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var parent: CompactOpacitySlider
+        init(_ parent: CompactOpacitySlider) { self.parent = parent }
+
+        @objc func valueChanged(_ slider: SliderView) {
+            slider.doubleValue = slider.doubleValue.rounded()
+            slider.updateValueDescription()
+            parent.value = slider.doubleValue
+        }
+    }
+
+    final class SliderView: NSSlider {
+        var onEditingChanged: ((Bool) -> Void)?
+        private var grabOffset: CGFloat?
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var needsPanelToBecomeKey: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .arrow) }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard !isHidden, bounds.contains(convert(point, from: superview)) else { return nil }
+            return self
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            guard isEnabled, let cell = cell as? NSSliderCell else { return }
+            window?.makeFirstResponder(self)
+            let point = convert(event.locationInWindow, from: nil)
+            let knob = cell.knobRect(flipped: isFlipped)
+            // Grab the thumb without a jump, even when aiming just above/below it.
+            grabOffset = (knob.minX...knob.maxX).contains(point.x) ? point.x - knob.midX : 0
+            onEditingChanged?(true)
+            updatePointerValue(event)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard grabOffset != nil else { return }
+            updatePointerValue(event)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard grabOffset != nil else { return }
+            updatePointerValue(event)
+            grabOffset = nil
+            onEditingChanged?(false)
+        }
+
+        private func updatePointerValue(_ event: NSEvent) {
+            guard let grabOffset, let cell = cell as? NSSliderCell else { return }
+            let point = convert(event.locationInWindow, from: nil)
+            let track = cell.barRect(flipped: isFlipped)
+            let inset = cell.knobRect(flipped: isFlipped).width / 2
+            let travel = track.width - 2 * inset
+            guard travel > 0 else { return }
+            let fraction = min(1, max(0, (point.x - grabOffset - track.minX - inset) / travel))
+            let value = (minValue + Double(fraction) * (maxValue - minValue)).rounded()
+            guard value != doubleValue else { return }
+            doubleValue = value
+            updateValueDescription()
+            sendAction(action, to: target)
+        }
+
+        func updateValueDescription() {
+            let description = "\(Int(doubleValue))% 불투명"
+            setAccessibilityValueDescription(description)
+            toolTip = "포스트잇 투명도 · \(description)"
+        }
+    }
+
+    final class SliderCell: NSSliderCell {
+        var trackColor: NSColor = .labelColor
+
+        override func drawBar(inside rect: NSRect, flipped: Bool) {
+            trackColor.withAlphaComponent(0.3).setFill()
+            let inset = knobRect(flipped: flipped).width / 2
+            let track = NSRect(
+                x: rect.minX + inset, y: rect.midY - 1,
+                width: max(0, rect.width - 2 * inset), height: 2
+            )
+            NSBezierPath(roundedRect: track, xRadius: 1, yRadius: 1).fill()
+        }
+
+        override func drawKnob(_ knobRect: NSRect) {
+            let circle = NSRect(x: knobRect.midX - 5, y: knobRect.midY - 5, width: 10, height: 10)
+            let path = NSBezierPath(ovalIn: circle)
+            NSColor(white: 0.97, alpha: 1).setFill()
+            path.fill()
+            NSColor(white: 0, alpha: 0.18).setStroke()
+            path.lineWidth = 0.5
+            path.stroke()
+        }
+    }
+}
+
 /// The visible grip is only 8 pt; its 24 pt target is easier to acquire.
 private struct StickyNoteResizeHandle: NSViewRepresentable {
     let color: NSColor
@@ -380,11 +545,12 @@ private struct StickyNoteResizeHandle: NSViewRepresentable {
 }
 
 /// Restrict moving to the top strip so selecting text and using controls never drag the note.
-private struct StickyNoteDragArea: NSViewRepresentable {
+struct StickyNoteDragArea: NSViewRepresentable {
     func makeNSView(context: Context) -> DragView { DragView() }
     func updateNSView(_ nsView: DragView, context: Context) {}
 
     final class DragView: NSView {
+        private var dragStart: (pointer: CGPoint, origin: CGPoint)?
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
             toolTip = "여기를 드래그해서 포스트잇 이동"
@@ -396,13 +562,35 @@ private struct StickyNoteDragArea: NSViewRepresentable {
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override var needsPanelToBecomeKey: Bool { true }
         override var acceptsFirstResponder: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
 
         override func resetCursorRects() {
             addCursorRect(bounds, cursor: .openHand)
         }
 
         override func mouseDown(with event: NSEvent) {
-            window?.performDrag(with: event)
+            guard let window else { return }
+            dragStart = (window.convertPoint(toScreen: event.locationInWindow), window.frame.origin)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let window, let dragStart else { return }
+            let pointer = window.convertPoint(toScreen: event.locationInWindow)
+            let origin = CGPoint(
+                x: dragStart.origin.x + pointer.x - dragStart.pointer.x,
+                y: dragStart.origin.y + pointer.y - dragStart.pointer.y
+            )
+            // Keep the only move target below the menu bar, as native titlebar
+            // dragging did. Use the pointer's display so crossing screens works.
+            let screen = NSScreen.screens.first { $0.frame.contains(pointer) } ?? window.screen
+            let frame = NSRect(origin: origin, size: window.frame.size)
+            window.setFrameOrigin(window.constrainFrameRect(frame, to: screen).origin)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard dragStart != nil else { return }
+            mouseDragged(with: event)
+            dragStart = nil
         }
     }
 }
