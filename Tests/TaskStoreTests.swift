@@ -311,10 +311,45 @@ private enum TaskStoreTests {
         try testStickySizePersistence(in: directory)
         try testStickyFontPersistence(in: directory)
         try testStickyColorPersistence(in: directory)
+        try testStickyOpacityPersistence(in: directory)
         try testCategories(in: directory)
         try testRequiredCategoryMigration(in: directory)
         try testReminders(in: directory)
         print("Passed local-store cold start, CRUD, Unicode, completion retries, sorting, pagination, concurrency, sticky-note migration/state, and backup transfer tests.")
+    }
+
+    private static func testStickyOpacityPersistence(in directory: URL) throws {
+        let url = directory.appendingPathComponent("sticky-opacity.sqlite")
+        let store = try TodoStore(databaseURL: url)
+        let first = try store.addTask(title: "반투명 포스트잇", showAsStickyNote: true)
+        let second = try store.addTask(title: "기본 포스트잇", showAsStickyNote: true)
+        try executeLegacySQL("ALTER TABLE sticky_notes DROP COLUMN opacity", at: url)
+        let upgraded = try TodoStore(databaseURL: url)
+        try expect(try upgraded.fetchSnapshot().stickyNotes.allSatisfy { $0.opacity == 100 }, "Existing notes start fully opaque after upgrade")
+
+        try upgraded.saveStickyOpacity(id: first.id, opacity: 65)
+        do {
+            try upgraded.saveStickyOpacity(id: first.id, opacity: 0)
+            throw TestFailure(description: "An invisible note opacity was accepted")
+        } catch TodoStoreError.invalidOpacity {}
+        try upgraded.hideAllStickyNotes()
+        try upgraded.restoreHiddenStickyNotes()
+
+        let reopened = try TodoStore(databaseURL: url)
+        let saved = try reopened.fetchSnapshot()
+        let opacities = Dictionary(uniqueKeysWithValues: saved.stickyNotes.map { ($0.id, $0.opacity) })
+        try expect(opacities == [first.id: 65, second.id: 100], "Hide, restore and reopening preserve each note's opacity")
+
+        let destination = try TodoStore(databaseURL: directory.appendingPathComponent("sticky-opacity-restored.sqlite"))
+        let backup = try reopened.exportBackup(to: directory)
+        _ = try destination.restoreBackup(from: backup)
+        try expect(try destination.fetchSnapshot() == saved, "A new backup preserves custom opacity")
+
+        let legacy = directory.appendingPathComponent("opacity-legacy-v3.wtdtbackup")
+        try FileManager.default.copyItem(at: backup, to: legacy)
+        try executeLegacySQL("ALTER TABLE sticky_notes DROP COLUMN opacity; PRAGMA user_version = 3;", at: legacy)
+        _ = try destination.restoreBackup(from: legacy)
+        try expect(try destination.fetchSnapshot().stickyNotes.allSatisfy { $0.opacity == 100 }, "Older backups restore at full opacity")
     }
 
     private static func testStickyColorPersistence(in directory: URL) throws {

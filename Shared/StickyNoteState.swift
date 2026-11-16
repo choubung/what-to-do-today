@@ -19,6 +19,9 @@ enum StickyNoteTypography {
 }
 
 struct StickyNoteState: Identifiable, Equatable, Sendable {
+    static let opacityRange = 30...100
+    static let defaultOpacity = opacityRange.upperBound
+
     let id: UUID
     let isVisible: Bool
     let isAlwaysOnTop: Bool
@@ -27,12 +30,14 @@ struct StickyNoteState: Identifiable, Equatable, Sendable {
     let fontSize: Double?
     let colorHex: String?
     let categoryColorHex: String?
+    let opacity: Int
 
     var effectiveColorHex: String? { colorHex ?? categoryColorHex }
 
     init(
         id: UUID, isVisible: Bool, isAlwaysOnTop: Bool, position: StickyNotePosition?,
-        size: StickyNoteSize? = nil, fontSize: Double? = nil, colorHex: String? = nil, categoryColorHex: String? = nil
+        size: StickyNoteSize? = nil, fontSize: Double? = nil, colorHex: String? = nil, categoryColorHex: String? = nil,
+        opacity: Int = Self.defaultOpacity
     ) {
         self.id = id
         self.isVisible = isVisible
@@ -42,6 +47,7 @@ struct StickyNoteState: Identifiable, Equatable, Sendable {
         self.fontSize = fontSize
         self.colorHex = colorHex
         self.categoryColorHex = categoryColorHex
+        self.opacity = opacity
     }
 }
 
