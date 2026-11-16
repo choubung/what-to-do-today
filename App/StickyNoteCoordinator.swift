@@ -223,6 +223,7 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
     private let model: TodoListModel
     private var task: TodoItem
     private var note: StickyNoteState
+    private var previewOpacity: Int?
     private var suppressGeometryChanges = false
     private var placementDisplayID: String?
     private var hostingView: StickyNoteHostingView?
@@ -279,11 +280,13 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
             || self.note.fontSize != note.fontSize
             || self.note.colorHex != note.colorHex
             || self.note.categoryColorHex != note.categoryColorHex
+            || self.note.opacity != note.opacity
         let behaviorChanged = hostingView == nil || self.note.isAlwaysOnTop != note.isAlwaysOnTop
         self.task = task
         self.note = note
         guard let panel = window as? NSPanel else { return }
         panel.backgroundColor = StickyNoteAppearance.background(for: note.effectiveColorHex)
+        updateOpacity()
         if panel.title != task.title {
             panel.title = task.title
             if isRegisteredInWindowMenu {
@@ -300,6 +303,10 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
         guard hostingView == nil || contentChanged else { return }
         let content = StickyNoteView(
             model: model, task: task, note: note,
+            onPreviewOpacity: { [weak self] opacity in
+                self?.previewOpacity = opacity
+                self?.updateOpacity()
+            },
             onHide: { [weak self] in self?.onHide?() },
             onComplete: { [weak self] in self?.onComplete?(task) }
         )
@@ -314,6 +321,10 @@ private final class StickyNoteWindowController: NSWindowController, NSWindowDele
             self.hostingView = hostingView
             panel.contentView = hostingView
         }
+    }
+
+    private func updateOpacity() {
+        window?.alphaValue = CGFloat(previewOpacity ?? note.opacity) / 100
     }
 
     func show() {

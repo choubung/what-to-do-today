@@ -32,10 +32,14 @@ struct StickyNoteView: View {
     @ObservedObject var model: TodoListModel
     let task: TodoItem
     let note: StickyNoteState
+    let onPreviewOpacity: (Int?) -> Void
     let onHide: () -> Void
     let onComplete: () -> Void
     @State private var isChangingFontSize = false
     @State private var isEditingColor = false
+    @State private var isDraggingOpacity = false
+    @State private var draftOpacity: Double?
+    @State private var opacitySaveVersion = 0
     @Environment(\.colorScheme) private var colorScheme
 
     private var fontSize: Double { model.effectiveStickyFontSize(for: note) }
@@ -46,17 +50,21 @@ struct StickyNoteView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            StickyNoteDragArea()
-                .frame(height: 24)
-                .overlay {
-                    Capsule()
-                        .fill(.secondary.opacity(0.3))
-                        .frame(width: 30, height: 4)
-                        .allowsHitTesting(false)
-                }
-                .padding(.horizontal, 6)
+            HStack(spacing: 4) {
+                StickyNoteDragArea()
+                    .overlay {
+                        Capsule()
+                            .fill(.secondary.opacity(0.3))
+                            .frame(width: 30, height: 4)
+                            .allowsHitTesting(false)
+                    }
+                opacitySlider
+            }
+            .frame(height: 24)
+            .padding(.leading, 6)
+            .padding(.trailing, 14)
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 controls
 
                 ScrollView {
@@ -97,7 +105,7 @@ struct StickyNoteView: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.bottom, 14)
+            .padding(.bottom, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(Color(nsColor: StickyNoteAppearance.foreground(for: note.effectiveColorHex)))
@@ -116,6 +124,35 @@ struct StickyNoteView: View {
                 await model.setStickyColor(id: task.id, colorHex: colorHex)
             }
             .environment(\.colorScheme, colorScheme)
+        }
+    }
+
+    private var opacitySlider: some View {
+        CompactOpacitySlider(
+            value: Binding(get: { draftOpacity ?? Double(note.opacity) }, set: { value in
+                draftOpacity = value
+                onPreviewOpacity(Int(value))
+                if !isDraggingOpacity { saveOpacity() }
+            }),
+            trackColor: StickyNoteAppearance.foreground(for: note.effectiveColorHex),
+            onEditingChanged: { editing in
+                isDraggingOpacity = editing
+                if !editing { saveOpacity() }
+            }
+        )
+        .frame(width: 50, height: 24)
+        .disabled(model.isCompleting(task.id))
+    }
+
+    private func saveOpacity() {
+        guard let draftOpacity else { return }
+        opacitySaveVersion += 1
+        let version = opacitySaveVersion
+        Task {
+            _ = await model.setStickyOpacity(id: task.id, opacity: Int(draftOpacity))
+            guard version == opacitySaveVersion, !isDraggingOpacity else { return }
+            self.draftOpacity = nil
+            onPreviewOpacity(nil)
         }
     }
 
@@ -312,6 +349,95 @@ struct StickyNoteColorEditor: View {
         .disabled(isSaving)
         .padding(20)
         .frame(width: 300)
+    }
+}
+
+/// Keeps native slider tracking, keyboard and accessibility behavior, with quiet chrome.
+private struct CompactOpacitySlider: NSViewRepresentable {
+    @Binding var value: Double
+    let trackColor: NSColor
+    let onEditingChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> SliderView {
+        let slider = SliderView()
+        slider.cell = SliderCell()
+        slider.minValue = Double(StickyNoteState.opacityRange.lowerBound)
+        slider.maxValue = Double(StickyNoteState.opacityRange.upperBound)
+        slider.isContinuous = true
+        slider.controlSize = .mini
+        slider.target = context.coordinator
+        slider.action = #selector(Coordinator.valueChanged(_:))
+        slider.setAccessibilityLabel("포스트잇 투명도")
+        slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return slider
+    }
+
+    func updateNSView(_ slider: SliderView, context: Context) {
+        context.coordinator.parent = self
+        slider.onEditingChanged = onEditingChanged
+        slider.doubleValue = value
+        slider.isEnabled = context.environment.isEnabled
+        (slider.cell as? SliderCell)?.trackColor = trackColor
+        slider.updateValueDescription()
+        slider.needsDisplay = true
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var parent: CompactOpacitySlider
+        init(_ parent: CompactOpacitySlider) { self.parent = parent }
+
+        @objc func valueChanged(_ slider: SliderView) {
+            slider.doubleValue = slider.doubleValue.rounded()
+            slider.updateValueDescription()
+            parent.value = slider.doubleValue
+        }
+    }
+
+    final class SliderView: NSSlider {
+        var onEditingChanged: ((Bool) -> Void)?
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var needsPanelToBecomeKey: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func mouseDown(with event: NSEvent) {
+            guard isEnabled else { return }
+            onEditingChanged?(true)
+            defer { onEditingChanged?(false) }
+            super.mouseDown(with: event)
+        }
+
+        func updateValueDescription() {
+            let description = "\(Int(doubleValue))% 불투명"
+            setAccessibilityValueDescription(description)
+            toolTip = "포스트잇 투명도 · \(description)"
+        }
+    }
+
+    final class SliderCell: NSSliderCell {
+        var trackColor: NSColor = .labelColor
+
+        override func drawBar(inside rect: NSRect, flipped: Bool) {
+            trackColor.withAlphaComponent(0.3).setFill()
+            let inset = knobRect(flipped: flipped).width / 2
+            let track = NSRect(
+                x: rect.minX + inset, y: rect.midY - 1,
+                width: max(0, rect.width - 2 * inset), height: 2
+            )
+            NSBezierPath(roundedRect: track, xRadius: 1, yRadius: 1).fill()
+        }
+
+        override func drawKnob(_ knobRect: NSRect) {
+            let circle = NSRect(x: knobRect.midX - 5, y: knobRect.midY - 5, width: 10, height: 10)
+            let path = NSBezierPath(ovalIn: circle)
+            NSColor(white: 0.97, alpha: 1).setFill()
+            path.fill()
+            NSColor(white: 0, alpha: 0.18).setStroke()
+            path.lineWidth = 0.5
+            path.stroke()
+        }
     }
 }
 
