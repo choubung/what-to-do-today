@@ -10,20 +10,18 @@
 </p>
 
 <p align="center">
-  <strong>v1.4.0</strong>
-  · <a href="https://github.com/choubung/what-to-do-today/releases/download/v1.4.0/WhatToDoToday-1.4.0.dmg"><strong>DMG 다운로드 (위젯 없음)</strong></a>
-  · <a href="https://github.com/choubung/what-to-do-today/blob/v1.4.0/docs/build.md#위젯-포함-앱-직접-설치"><strong>Xcode 설치 안내 (위젯 포함)</strong></a><br>
+  <strong>v1.4.1</strong>
+  · <a href="https://github.com/choubung/what-to-do-today/releases/download/v1.4.1/WhatToDoToday-1.4.1.dmg"><strong>DMG 다운로드 (위젯 없음)</strong></a>
+  · <a href="https://github.com/choubung/what-to-do-today/blob/v1.4.1/docs/build.md#위젯-포함-앱-직접-설치"><strong>Xcode 설치 안내 (위젯 포함)</strong></a><br>
   <a href="https://github.com/choubung/what-to-do-today/releases/latest">최신 릴리스</a>
   · <a href="#설치하고-시작하기">설치 방법</a><br>
   <sub>Apple Silicon Mac · macOS 27.0.1 이상</sub>
 </p>
 
-## v1.4.0에서 달라진 점
+## v1.4.1에서 달라진 점
 
-- 할 일의 **제목을 드래그**하면 같은 카테고리 안에서 순서를 바꿀 수 있습니다. 위젯에도 같은 순서가 반영됩니다.
-- 완료 직전까지 떠 있던 포스트잇은 **완료를 취소**하면 이전 위치와 크기로 다시 뜹니다. 앱과 위젯 어디에서든 취소할 수 있습니다.
-- ‘완료했어요’ 안내는 **1초** 뒤에 사라집니다.
-- 같은 카테고리가 ‘할 일’과 ‘한 일’에 모두 있을 때 카테고리 제목이나 추가 버튼이 섞여 보이던 문제를 고쳤습니다.
+- 다른 앱을 사용하는 중에도 전역 단축키로 새 할 일을 적거나 포스트잇을 숨기고 다시 띄울 수 있습니다. 설정에서 조합을 바꾸거나 해제할 수 있습니다.
+- 새 할 일은 같은 카테고리의 맨 아래에 추가됩니다.
 
 ## 앱에서 목록 관리하기
 
@@ -62,13 +60,13 @@
 
 ### DMG로 설치 · 위젯 없음
 
-1. [v1.4.0 DMG 다운로드](https://github.com/choubung/what-to-do-today/releases/download/v1.4.0/WhatToDoToday-1.4.0.dmg)
+1. [v1.4.1 DMG 다운로드](https://github.com/choubung/what-to-do-today/releases/download/v1.4.1/WhatToDoToday-1.4.1.dmg)
 2. DMG를 열고 **What to Do Today (DMG)** 앱을 **응용 프로그램** 폴더로 끌어 옮긴 뒤 실행합니다.
 3. 앱에 Apple 공증이 적용되어 있지 않아 첫 실행 시 시스템 설정에서 ‘그래도 열기’를 눌러야 할 수 있습니다. [Apple의 첫 실행 안내](https://support.apple.com/ko-kr/102445)
 
 ### Xcode로 설치 · 위젯 포함
 
-1. [v1.4.0 소스 ZIP 다운로드](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.4.0.zip)
+1. [v1.4.1 소스 ZIP 다운로드](https://github.com/choubung/what-to-do-today/archive/refs/tags/v1.4.1.zip)
 2. 압축을 풀고 [직접 설치 안내](docs/build.md#위젯-포함-앱-직접-설치)에 따라 빌드합니다.
 3. 설치한 앱을 한 번 연 뒤, 바탕화면의 ‘**위젯 편집**’에서 ‘**할 일**’을 추가합니다.
 
@@ -98,7 +96,7 @@
 
 백업에는 할 일, 완료 기록, 카테고리, 포스트잇 설정, 예약 알림이 들어 있습니다. 가져오기를 실행하면 새 앱의 데이터는 백업 내용으로 바뀌고, 가져오기 직전 데이터는 별도 백업에 보관됩니다.
 
-v1.4.0에서는 v1.3.4와 v1.3.5에서 만든 백업도 가져올 수 있습니다. v1.4.0에서 내보낸 백업에는 직접 정한 할 일 순서가 포함되므로, 가져올 앱도 v1.4.0 이상이어야 합니다. 알림 권한과 로그인 시 자동 실행은 새 앱에서 다시 설정할 수 있습니다.
+v1.4.1에서는 이전 버전에서 만든 백업도 가져올 수 있습니다. v1.4.0부터 내보낸 백업에는 직접 정한 할 일 순서가 포함되므로, 가져올 앱도 v1.4.0 이상이어야 합니다. 알림 권한과 로그인 시 자동 실행은 새 앱에서 다시 설정할 수 있습니다.
 
 ## 이렇게 사용하세요
 
